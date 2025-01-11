@@ -1,0 +1,61 @@
+[job]
+dump_folder = "exp"
+description = "Transformer 340M"
+print_args = true
+
+[profiling]
+enable_profiling = true
+save_traces_folder = "profile_trace"
+profile_freq = 512
+
+[metrics]
+log_freq = 32
+enable_wandb = true
+
+[model]
+config = "configs/transformer_340M.json"
+norm_type = "rmsnorm"
+tokenizer_path = "fla-hub/gla-1.3B-100B"
+
+[optimizer]
+name = "AdamW"
+lr = 3e-4
+fused = true
+scheduler = 'wsd'
+
+[training]
+batch_size = 32
+seq_len = 2048
+warmup_steps = 1024
+max_norm = 1.0
+steps = 20480
+gradient_accumulation_steps = 1
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+compile = false
+dataset = "HuggingFaceFW/fineweb-edu"
+dataset_name = "default"
+dataset_split = "train"
+num_workers = 32
+pin_memory = false
+persistent_workers = false
+prefetch_factor = 2
+seed = 42
+varlen = false
+
+[experimental]
+context_parallel_degree = 1
+pipeline_parallel_degree = 1
+
+[checkpoint]
+enable_checkpoint = true
+folder = "checkpoint"
+interval_type = "steps"
+interval = 2048
+model_weights_only = false
+export_dtype = "float32"
+async_mode = "disabled"    # ["disabled", "async", "async_with_pinned_mem"]
+
+[float8]
+enable_float8_linear = false
