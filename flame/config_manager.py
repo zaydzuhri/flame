@@ -7,7 +7,7 @@
 import argparse
 import sys
 from collections import defaultdict
-from typing import Tuple, Union
+from typing import Tuple
 
 import torch
 
@@ -87,6 +87,26 @@ class JobConfig:
             help="Print the args to terminal",
         )
 
+        # model configs
+        self.parser.add_argument(
+            "--model.config",
+            type=str,
+            default="fla-hub/gla-1.3B-100B",
+            help="Path to the model config",
+        )
+        self.parser.add_argument(
+            "--model.norm_type",
+            type=str,
+            default="rmsnorm",
+            help="Type of layer normalization to use [layernorm, np_layernorm, rmsnorm, fused_rmsnorm]",
+        )
+        self.parser.add_argument(
+            "--model.tokenizer_path",
+            type=str,
+            default="fla-hub/gla-1.3B-100B",
+            help="Tokenizer path",
+        )
+
         # profiling configs
         self.parser.add_argument(
             "--profiling.enable_profiling",
@@ -117,66 +137,6 @@ class JobConfig:
             help="Memeory snapshot files location",
         )
 
-        # metrics configs
-        self.parser.add_argument(
-            "--metrics.log_freq",
-            type=int,
-            default=10,
-            help="How often to log metrics to TensorBoard, in iterations",
-        )
-        self.parser.add_argument(
-            "--metrics.enable_tensorboard",
-            action="store_true",
-            help="Whether to log metrics to TensorBoard",
-        )
-        self.parser.add_argument(
-            "--metrics.disable_color_printing",
-            action="store_true",
-            help="Whether to disable color printing in logs",
-        )
-        self.parser.add_argument(
-            "--metrics.save_tb_folder",
-            type=str,
-            default="tb",
-            help="Folder to dump TensorBoard states",
-        )
-        # TODO: store_true & default=True make impossible for cmd to set it to False
-        self.parser.add_argument(
-            "--metrics.rank_0_only",
-            action="store_true",
-            default=True,
-            help="""
-                Whether to save TensorBoard metrics only for rank 0 or for all ranks.
-                When pipeline_parallel_degree is > 1, this option uses the 0th rank of the last stage pipeline group,
-                which is the only stage that computes loss metrics.
-            """,
-        )
-        self.parser.add_argument(
-            "--metrics.enable_wandb",
-            action="store_true",
-            help="Whether to log metrics to Weights & Biases",
-        )
-
-        # model configs
-        self.parser.add_argument(
-            "--model.config",
-            type=str,
-            default="fla-hub/gla-1.3B-100B",
-            help="Path to the model config",
-        )
-        self.parser.add_argument(
-            "--model.norm_type",
-            type=str,
-            default="rmsnorm",
-            help="Type of layer normalization to use [layernorm, np_layernorm, rmsnorm, fused_rmsnorm]",
-        )
-        self.parser.add_argument(
-            "--model.tokenizer_path",
-            type=str,
-            default="fla-hub/gla-1.3B-100B",
-            help="Tokenizer path",
-        )
-
         # optimizer configs
         self.parser.add_argument(
             "--optimizer.name", type=str, default="AdamW", help="Optimizer to use"
@@ -190,6 +150,13 @@ class JobConfig:
             help="Whether the fused implementation(CUDA only) is used.",
         )
         self.parser.add_argument(
+            "--optimizer.scheduler",
+            type=str,
+            default="cosine",
+            choices=["wsd", "cosine", "linear"],
+            help="Scheduler to use. Currently supported: wsd, cosine, and linear.",
+        )
+        self.parser.add_argument(
             "--optimizer.early_step_in_backward",
             action="store_true",
             help="""
@@ -199,16 +166,6 @@ class JobConfig:
         )
 
         # training configs
-        self.parser.add_argument(
-            "--training.dataset", type=str, default="c4_mini", help="Dataset to use"
-        )
-        self.parser.add_argument(
-            "--training.dataset_path",
-            type=str,
-            help="""
-                Path to the dataset in the file system. If provided, data will be
-                loaded from this path instead of downloaded.""",
-        )
         self.parser.add_argument(
             "--training.batch_size", type=int, default=8, help="Batch size"
         )
@@ -222,16 +179,53 @@ class JobConfig:
             help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
         )
         self.parser.add_argument(
-            "--training.max_norm",
-            type=Union[float, int],
-            default=1.0,
-            help="Max norm for gradient clipping",
+            "--training.gradient_accumulation_steps",
+            type=int,
+            default=1,
+            help="Number of steps to accumulate gradients before updating parameters",
         )
         self.parser.add_argument(
             "--training.steps",
             type=int,
             default=10000,
             help="How many train steps to run",
+        )
+        self.parser.add_argument(
+            "--training.max_norm",
+            type=float,
+            default=1.0,
+            help="Max norm for gradient clipping",
+        )
+        self.parser.add_argument(
+            "--training.dataset",
+            type=str,
+            default="HuggingFaceFW/fineweb-edu",
+            help="Dataset to use"
+        )
+        self.parser.add_argument(
+            "--training.dataset_name",
+            type=str,
+            default="default",
+            help="The name of the dataset config"
+        )
+        self.parser.add_argument(
+            "--training.dataset_split",
+            type=str,
+            default="train",
+            help="Dataset split to use"
+        )
+        self.parser.add_argument(
+            "--training.num_workers",
+            type=int,
+            default=32,
+            help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
+        )
+        self.parser.add_argument(
+            "--training.prefetch_factor",
+            type=int,
+            default=2,
+            help="Number of batches loaded in advance by each worker."
+                 "2 means there will be a total of 2 * num_workers batches prefetched across all workers."
         )
         self.parser.add_argument(
             "--training.data_parallel_replicate_degree",
@@ -278,6 +272,88 @@ class JobConfig:
             action="store_true",
             help="Whether to apply loss parallel when sequence parallel is enabled",
         )
+        self.parser.add_argument(
+            "--training.mixed_precision_param",
+            type=str,
+            default="bfloat16",
+            choices=["bfloat16", "float32"],
+            help="""
+                torch dtype to use for parameters when applying mixed precision via FSDP.
+                This feature only takes effect when data_parallel_shard_degree > 1
+            """,
+        )
+        self.parser.add_argument(
+            "--training.mixed_precision_reduce",
+            type=str,
+            default="float32",
+            choices=["float32"],
+            help="""
+                torch dtype to use for reductions when applying mixed precision via FSDP.
+                This feature only takes effect when data_parallel_shard_degree > 1
+            """,
+        )
+        self.parser.add_argument(
+            "--training.compile",
+            action="store_true",
+            help="Whether to compile the model",
+        )
+        self.parser.add_argument(
+            "--training.gc_freq",
+            type=int,
+            default=50,
+            help="Python garbage control scheduling interval, in steps",
+        )
+        self.parser.add_argument(
+            "--training.seed",
+            type=int,
+            default=42,
+            help="Choose the base RNG seed used for training",
+        )
+        self.parser.add_argument(
+            "--training.deterministic",
+            action="store_true",
+            help="Use deterministic algorithms wherever possible, may be slower",
+        )
+        # metrics configs
+        self.parser.add_argument(
+            "--metrics.log_freq",
+            type=int,
+            default=10,
+            help="How often to log metrics to TensorBoard, in iterations",
+        )
+        self.parser.add_argument(
+            "--metrics.enable_tensorboard",
+            action="store_true",
+            help="Whether to log metrics to TensorBoard",
+        )
+        self.parser.add_argument(
+            "--metrics.disable_color_printing",
+            action="store_true",
+            help="Whether to disable color printing in logs",
+        )
+        self.parser.add_argument(
+            "--metrics.save_tb_folder",
+            type=str,
+            default="tb",
+            help="Folder to dump TensorBoard states",
+        )
+        # TODO: store_true & default=True make impossible for cmd to set it to False
+        self.parser.add_argument(
+            "--metrics.rank_0_only",
+            action="store_true",
+            default=True,
+            help="""
+                Whether to save TensorBoard metrics only for rank 0 or for all ranks.
+                When pipeline_parallel_degree is > 1, this option uses the 0th rank of the last stage pipeline group,
+                which is the only stage that computes loss metrics.
+            """,
+        )
+        self.parser.add_argument(
+            "--metrics.enable_wandb",
+            action="store_true",
+            help="Whether to log metrics to Weights & Biases",
+        )
+
         self.parser.add_argument(
             "--experimental.enable_async_tensor_parallel",
             action="store_true",
@@ -368,48 +444,6 @@ class JobConfig:
 
                 The default value is 'allgather'.
             """,
-        )
-        self.parser.add_argument(
-            "--training.mixed_precision_param",
-            type=str,
-            default="bfloat16",
-            choices=["bfloat16", "float32"],
-            help="""
-                torch dtype to use for parameters when applying mixed precision via FSDP.
-                This feature only takes effect when data_parallel_shard_degree > 1
-            """,
-        )
-        self.parser.add_argument(
-            "--training.mixed_precision_reduce",
-            type=str,
-            default="float32",
-            choices=["float32"],
-            help="""
-                torch dtype to use for reductions when applying mixed precision via FSDP.
-                This feature only takes effect when data_parallel_shard_degree > 1
-            """,
-        )
-        self.parser.add_argument(
-            "--training.compile",
-            action="store_true",
-            help="Whether to compile the model",
-        )
-        self.parser.add_argument(
-            "--training.gc_freq",
-            type=int,
-            default=50,
-            help="Python garbage control scheduling interval, in steps",
-        )
-        self.parser.add_argument(
-            "--training.seed",
-            type=int,
-            default=None,
-            help="Choose the base RNG seed used for training",
-        )
-        self.parser.add_argument(
-            "--training.deterministic",
-            action="store_true",
-            help="Use deterministic algorithms wherever possible, may be slower",
         )
         # checkpointing configs
         self.parser.add_argument(
@@ -666,4 +700,5 @@ class JobConfig:
 
         cmd_args, _ = aux_parser.parse_known_args(args_list)
 
+        return args, cmd_args
         return args, cmd_args

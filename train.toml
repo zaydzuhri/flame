@@ -1,35 +1,18 @@
-[job]
-dump_folder = "exp"
-description = "Transformer 340M"
-print_args = true
-
-[profiling]
-enable_profiling = true
-save_traces_folder = "profile_trace"
-profile_freq = 512
-
-[metrics]
-log_freq = 32
-enable_wandb = true
-
 [model]
 config = "configs/transformer_340M.json"
-norm_type = "rmsnorm"
-tokenizer_path = "fla-hub/gla-1.3B-100B"
+tokenizer_path = "fla-hub/transformer-1.3B-100B"
 
-[optimizer]
-name = "AdamW"
-lr = 3e-4
-fused = true
-scheduler = 'wsd'
+[job]
+dump_folder = "exp"
+print_args = true
 
 [training]
 batch_size = 32
 seq_len = 2048
 warmup_steps = 1024
-max_norm = 1.0
-steps = 20480
 gradient_accumulation_steps = 1
+steps = 20480
+max_norm = 1.0
 data_parallel_replicate_degree = 1
 data_parallel_shard_degree = -1
 tensor_parallel_degree = 1
@@ -44,9 +27,11 @@ prefetch_factor = 2
 seed = 42
 varlen = false
 
-[experimental]
-context_parallel_degree = 1
-pipeline_parallel_degree = 1
+[optimizer]
+name = "AdamW"
+fused = true
+lr = 3e-4
+scheduler = 'wsd'
 
 [checkpoint]
 enable_checkpoint = true
@@ -56,6 +41,19 @@ interval = 2048
 model_weights_only = false
 export_dtype = "float32"
 async_mode = "disabled"    # ["disabled", "async", "async_with_pinned_mem"]
+
+[profiling]
+enable_profiling = true
+save_traces_folder = "profile_trace"
+profile_freq = 512
+
+[metrics]
+log_freq = 32
+enable_wandb = true
+
+[experimental]
+context_parallel_degree = 1
+pipeline_parallel_degree = 1
 
 [float8]
 enable_float8_linear = false

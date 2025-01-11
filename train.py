@@ -17,13 +17,13 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 import fla  # noqa
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
+from flame.config_manager import JobConfig
 from flame.data import DataCollatorForLanguageModeling, build_dataloader
 from flame.metrics import build_device_memory_monitor, build_metric_logger
 from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
 from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
-from torchtitan.config_manager import JobConfig
 from torchtitan.float8 import Float8Handler
 from torchtitan.logging import init_logger, logger
 from torchtitan.parallelisms import ParallelDims
