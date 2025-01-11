@@ -16,13 +16,14 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.5",
-    "transformers>=4.45.0",
-    "triton>=3.0",
-    "datasets>=3.1.0",
-    "einops",
-    "ninja",
-    "wandb",
+    'torch>=2.5',
+    'torchdata',
+    'transformers>=4.45.0',
+    'triton>=3.0',
+    'datasets>=3.1.0',
+    'einops',
+    'ninja',
+    'wandb',
 ]
 
 [project.optional-dependencies]
