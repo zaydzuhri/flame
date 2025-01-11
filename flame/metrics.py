@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
+
 from torchtitan.config_manager import JobConfig
 from torchtitan.logging import logger
 from torchtitan.parallelisms import ParallelDims
@@ -109,6 +109,8 @@ class TensorBoardLogger(BaseLogger):
     """Logger implementation for TensorBoard."""
 
     def __init__(self, log_dir: str, tag: Optional[str] = None):
+        from torch.utils.tensorboard import SummaryWriter
+
         self.tag = tag
         self.writer = SummaryWriter(log_dir, max_queue=1000)
         logger.info(f"TensorBoard logging enabled. Logs will be saved at {log_dir}")
