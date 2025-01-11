@@ -45,7 +45,8 @@ class AsyncMode(str, enum.Enum):
 @dataclass
 class TrainState(Stateful):
     step: int = 0
-    tokens: int = 0
+    skipped_step: int = 0
+    token: int = 0
     elapsed: timedelta = timedelta(0)
     global_avg_losses: List[float] = field(default_factory=list)
     global_max_losses: List[float] = field(default_factory=list)
@@ -62,7 +63,8 @@ class TrainState(Stateful):
         torch.save(self.log_steps, log_steps_bytes)
         return {
             "step": torch.tensor(self.step, dtype=torch.int32),
-            "tokens": torch.tensor(self.tokens, dtype=torch.int64),
+            "skipped_step": torch.tensor(self.skipped_step, dtype=torch.int32),
+            "token": torch.tensor(self.token, dtype=torch.int64),
             "elapsed": self.elapsed,
             "global_avg_losses": global_avg_losses_bytes,
             "global_max_losses": global_max_losses_bytes,
@@ -71,7 +73,8 @@ class TrainState(Stateful):
 
     def load_state_dict(self, state_dict) -> None:
         self.step = state_dict["step"].item()
-        self.tokens = state_dict["tokens"].item()
+        self.skipped_step = state_dict.get("skipped_step", 0).item()
+        self.token = state_dict["token"].item()
         self.elapsed = state_dict["elapsed"]
         state_dict["global_avg_losses"].seek(0)
         self.global_avg_losses = torch.load(

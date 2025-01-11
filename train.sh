@@ -20,7 +20,7 @@ Training a 340M model:
 
 bash train.sh \
   --job.config_file train.toml \
-  --job.dump_folder exp/transformer-340M-10B/batch32.seqlen2048.warmup512.update1.steps20480.lr3e-4 \
+  --job.dump_folder exp/transformer-340M-10B/batch32.seqlen2048.warmup1024.update1.steps20480.lr3e-4 \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
@@ -32,6 +32,7 @@ bash train.sh \
   --training.gradient_accumulation_steps 1 \
   --training.steps 20480 \
   --training.max_norm 1.0 \
+  --training.skip_nan_inf \
   --training.dataset HuggingFaceFW/fineweb-edu \
   --training.dataset_name default \
   --training.dataset_split train \

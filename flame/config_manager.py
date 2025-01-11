@@ -197,6 +197,11 @@ class JobConfig:
             help="Max norm for gradient clipping",
         )
         self.parser.add_argument(
+            "--training.skip_nan_inf",
+            action="store_true",
+            help="Skip batch updates when NaN or INF gradients are encountered during training",
+        )
+        self.parser.add_argument(
             "--training.dataset",
             type=str,
             default="HuggingFaceFW/fineweb-edu",

@@ -85,7 +85,7 @@ def main(job_config: JobConfig):
     )
 
     logger.info("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(job_config.model.tokenizer_path)
+    tokenizer = AutoTokenizer.from_pretrained(job_config.model.tokenizer_path, trust_remote_code=True)
     logger.info(f"{tokenizer}")
     logger.info("Loading dataset...")
     dataset = load_dataset(
@@ -329,7 +329,12 @@ def main(job_config: JobConfig):
 
             # optimizer step
             checkpoint.maybe_wait_for_staging()
-            optimizers.step()
+            if job_config.training.skip_nan_inf and (grad_norm.isnan() or grad_norm.isinf()):
+                logger.warning(f"Skipping optimizer step - detected invalid gradient norm: {grad_norm:.4f} (NaN={grad_norm.isnan()}, Inf={grad_norm.isinf()})")
+                optimizers.zero_grad()
+                train_state.skipped_step += 1
+            else:
+                optimizers.step()
             lr_schedulers.step()
 
             # calculate float8 dynamic amax/scale for all-parameter for FSDP2
@@ -357,7 +362,7 @@ def main(job_config: JobConfig):
                 time_delta = time.perf_counter() - time_last_log
 
                 # update train state
-                train_state.tokens += utils.dist_sum(ntokens_since_last_log, world_mesh["dp_cp"])
+                train_state.token += utils.dist_sum(ntokens_since_last_log, world_mesh["dp_cp"])
                 train_state.elapsed += timedelta(seconds=time_delta)
                 train_state.log_steps.append(train_state.step)
                 train_state.global_avg_losses.append(global_avg_loss)
@@ -384,6 +389,7 @@ def main(job_config: JobConfig):
                     "optim/global_max_loss": global_max_loss,
                     "optim/learning_rate": last_lr,
                     "optim/grad_norm": grad_norm,
+                    "optim/skipped": train_state.skipped_step,
                     "speed/throughput(tgs)": tgs,
                     "speed/mfu(%)": mfu,
                     "time/end_to_end(s)": time_end_to_end,
@@ -399,7 +405,7 @@ def main(job_config: JobConfig):
                 metric_logger.log(metrics, step=train_state.step)
 
                 logger.info(
-                    f"{color.cyan}step: {train_state.step:>8,} token: {train_state.tokens:>15,}  "
+                    f"{color.cyan}step: {train_state.step:>8,} token: {train_state.token:>15,}  "
                     f"{color.green}loss: {global_avg_loss:7.4f}  "
                     f"{color.blue}lr: {last_lr:.4e} gnorm: {grad_norm:5.2f} "
                     f"{color.yellow}memory: {device_mem_stats.max_reserved_gib:5.2f}GiB "
