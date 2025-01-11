@@ -1,0 +1,20 @@
+{
+    "attn_mode": "chunk",
+    "bos_token_id": 1,
+    "eos_token_id": 2,
+    "expand_ratio": 128,
+    "fuse_cross_entropy": true,
+    "fuse_norm": true,
+    "hidden_act": "swish",
+    "hidden_ratio": 4,
+    "hidden_size": 1024,
+    "initializer_range": 0.02,
+    "intermediate_size": null,
+    "model_type": "hgrn2",
+    "num_heads": 8,
+    "num_hidden_layers": 24,
+    "norm_eps": 1e-06,
+    "tie_word_embeddings": true,
+    "use_cache": true,
+    "vocab_size": 32000
+}
