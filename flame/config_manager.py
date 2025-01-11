@@ -205,7 +205,7 @@ class JobConfig:
         self.parser.add_argument(
             "--training.dataset_name",
             type=str,
-            default="default",
+            default=None,
             help="The name of the dataset config"
         )
         self.parser.add_argument(
