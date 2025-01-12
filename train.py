@@ -137,10 +137,7 @@ def main(job_config: JobConfig):
         model_config,
         job_config.training.seq_len,
     )
-    logger.info(
-        f"{color.blue}Model\n{model}\n"
-        f"{color.red}{model_param_count:,} parameters in total{color.reset}"
-    )
+    logger.info(f"{color.blue}Model\n{model}\n")
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
     if job_config.checkpoint.create_seed_checkpoint:
@@ -242,16 +239,19 @@ def main(job_config: JobConfig):
 
     checkpoint.reset()
 
+    global_batch_size = job_config.training.batch_size * dp_degree * job_config.training.gradient_accumulation_steps
     # train loop
-    logger.info(
-        f"Training starts at step {train_state.step + 1}, "
-        f"with local batch size {job_config.training.batch_size}, "
-        f"global batch size {job_config.training.batch_size * dp_degree} "
-        f"({job_config.training.batch_size * dp_degree * job_config.training.seq_len} tokens), "
-        f"sequence length {job_config.training.seq_len}, "
-        f"total steps {job_config.training.steps} "
-        f"(warmup {job_config.training.warmup_steps})"
-    )
+    logger.info(f"{color.red}***** Running training *****{color.green}")
+    logger.info(f"  Training starts at step {train_state.step + 1}, ")
+    logger.info(f"  Instantaneous batch size per device = {job_config.training.batch_size:,}")
+    logger.info(f"  Number of tokens per sequence = {job_config.training.seq_len:,}")
+    logger.info(f"  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}")
+    logger.info(f"  Global batch size (w. parallel, distributed & accumulation) = {global_batch_size:,}"
+                f" ({global_batch_size * job_config.training.seq_len} tokens)")
+    logger.info(f"  Total optimization steps = {job_config.training.steps:,}")
+    logger.info(f"  Warmup steps = {job_config.training.warmup_steps:,}")
+    logger.info(f"  Number of parameters = {model_param_count:,} {color.reset}")
+
     with maybe_enable_profiling(
         job_config, global_step=train_state.step
     ) as torch_profiler, maybe_enable_memory_snapshot(
@@ -449,5 +449,4 @@ if __name__ == "__main__":
     config = JobConfig()
     config.parse_args()
     main(config)
-    torch.distributed.destroy_process_group()
     torch.distributed.destroy_process_group()

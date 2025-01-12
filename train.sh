@@ -7,9 +7,17 @@ fi
 
 # use envs as local params for convenience
 # e.g.
-# LOG_RANK=0,1 NGPU=4 ./train.sh
+# NNODE=1 NGPU=8 LOG_RANK=0 ./train.sh
+NNODE=${NNODE:-"1"}
 NGPU=${NGPU:-"8"}
 LOG_RANK=${LOG_RANK:-0}
+
+if [[ -z "${MASTER_ADDR}" ]]; then
+  export MASTER_ADDR="localhost"
+fi
+if [[ -z "${MASTER_PORT}" ]]; then
+  export MASTER_PORT="0"
+fi
 
 : '
 Usage:
@@ -61,20 +69,21 @@ if [ "$date" == "" ]; then
   date=$(date +%Y%m%d%H%M)
 fi
 export WANDB_RESUME=allow
-if [[ -z "${WANDB_NAME}" ]]; then
-  export WANDB_NAME="$(basename $path)"
-fi
 if [[ -z "${WANDB_PROJECT}" ]]; then
   export WANDB_PROJECT="fla"
+fi
+if [[ -z "${WANDB_NAME}" ]]; then
+  export WANDB_NAME="$(basename $path)"
 fi
 if [[ -z "${WANDB_RUN_ID}" ]]; then
   export WANDB_RUN_ID="$WANDB_NAME-$date"
 fi
 
 PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" \
-torchrun --nproc_per_node=${NGPU} \
+torchrun --nnodes=${NNODE} \
+  --nproc_per_node=${NGPU} \
   --rdzv_backend c10d \
-  --rdzv_endpoint "localhost:0" \
+  --rdzv_endpoint "${MASTER_ADDR}:${MASTER_PORT}" \
   --local-ranks-filter ${LOG_RANK} \
   --role rank \
   --tee 3 \
