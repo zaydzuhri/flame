@@ -173,6 +173,14 @@ class JobConfig:
             "--training.seq_len", type=int, default=2048, help="Sequence length"
         )
         self.parser.add_argument(
+            "--training.context_len", type=int, default=2048, help="Max length allowed for each sequence"
+        )
+        self.parser.add_argument(
+            "--training.varlen",
+            action="store_true",
+            help="Whether to take sequences of variable length as input",
+        )
+        self.parser.add_argument(
             "--training.warmup_steps",
             type=int,
             default=200,

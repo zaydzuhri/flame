@@ -97,6 +97,11 @@ def main(job_config: JobConfig):
     )
     logger.info(f"{dataset}")
     logger.info("Building dataloader...")
+    collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        varlen=job_config.training.varlen,
+        context_len=job_config.training.context_len
+    )
     dataloader = build_dataloader(
         rank=dp_rank,
         world_size=dp_degree,
@@ -104,7 +109,7 @@ def main(job_config: JobConfig):
         tokenizer=tokenizer,
         batch_size=job_config.training.batch_size,
         seq_len=job_config.training.seq_len,
-        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, varlen=job_config.training.varlen),
+        collate_fn=collator,
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
@@ -240,17 +245,20 @@ def main(job_config: JobConfig):
     checkpoint.reset()
 
     global_batch_size = job_config.training.batch_size * dp_degree * job_config.training.gradient_accumulation_steps
+    num_tokens_per_step = global_batch_size * job_config.training.seq_len
     # train loop
-    logger.info(f"{color.red}***** Running training *****{color.green}")
-    logger.info(f"  Training starts at step {train_state.step + 1}, ")
-    logger.info(f"  Instantaneous batch size per device = {job_config.training.batch_size:,}")
-    logger.info(f"  Number of tokens per sequence = {job_config.training.seq_len:,}")
-    logger.info(f"  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}")
-    logger.info(f"  Global batch size (w. parallel, distributed & accumulation) = {global_batch_size:,}"
-                f" ({global_batch_size * job_config.training.seq_len} tokens)")
-    logger.info(f"  Total optimization steps = {job_config.training.steps:,}")
-    logger.info(f"  Warmup steps = {job_config.training.warmup_steps:,}")
-    logger.info(f"  Number of parameters = {model_param_count:,} {color.reset}")
+    logger.info(f"{color.red}***** Running training *****")
+    logger.info(f"{color.green}  Training starts at step {train_state.step + 1}")
+    logger.info(f"{color.green}  Number of tokens per sequence = {job_config.training.seq_len:,}")
+    logger.info(f"{color.green}  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}")
+    logger.info(f"{color.green}  Instantaneous batch size (per device) = {job_config.training.batch_size:,}")
+    logger.info(f"{color.green}  Global batch size (w. parallel, distributed & accumulation) = {global_batch_size:,}"
+                f" ({num_tokens_per_step:,} tokens)")
+    logger.info(f"{color.green}  Total optimization steps = {job_config.training.steps:,} "
+                f"({job_config.training.steps * num_tokens_per_step:,} tokens)")
+    logger.info(f"{color.green}  Warmup steps = {job_config.training.warmup_steps:,}"
+                f" ({job_config.training.warmup_steps * num_tokens_per_step:,} tokens)")
+    logger.info(f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}")
 
     with maybe_enable_profiling(
         job_config, global_step=train_state.step
@@ -275,6 +283,7 @@ def main(job_config: JobConfig):
 
                 input_ids = input_ids.to(device_type)
                 labels = labels.to(device_type)
+                offsets = batch['offsets'].to(device_type) if 'offsets' in batch else None
                 # apply context parallelism if cp is enabled
                 optional_context_parallel_ctx = (
                     utils.create_context_parallel_ctx(
@@ -310,7 +319,7 @@ def main(job_config: JobConfig):
                 else:
                     # Non-PP forward / backward
                     with train_context(optional_context_parallel_ctx):
-                        output = model(input_ids=input_ids, labels=labels)
+                        output = model(input_ids=input_ids, labels=labels, offsets=offsets)
                         loss = output.loss
                         loss.backward()
                 losses.append(loss)
