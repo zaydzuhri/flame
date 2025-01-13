@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 import pickle
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
+import datasets
 import numpy as np
 import torch
 from datasets import Dataset, IterableDataset
+from datasets.iterable_dataset import ShufflingConfig
 from torch.distributed.checkpoint.stateful import Stateful
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer
@@ -154,6 +157,157 @@ class BufferShuffledIterableDataset(IterableDataset):
         self.token_id = state_dict['token_id']
         self.rng_state = state_dict['rng_state'].clone() if state_dict['rng_state'] is not None else None
         self._epoch = state_dict['epoch']
+
+
+class OnlineTokenizedIterableDataset(IterableDataset):
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        tokenizer: PreTrainedTokenizer,
+        seq_len: int = 2048,
+        rank: int = 0,
+        world_size: int = 1
+    ) -> OnlineTokenizedIterableDataset:
+
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+
+        self.data = dataset.shard(world_size, rank)
+        self.seq_len = seq_len
+        self.rank = rank
+        self.world_size = world_size
+
+        self.states = None
+        self.tokens = []
+
+    def __iter__(self):
+        if self.states is not None:
+            self.data.load_state_dict(self.states)
+
+        while True:
+            for sample in self.tokenize(self.data):
+                # keep appending the samples to the token buffer
+                self.tokens += sample
+
+                while len(self.tokens) >= self.seq_len:
+                    input_ids = torch.tensor(self.tokens[:self.seq_len], dtype=torch.long)
+                    self.tokens = self.tokens[self.seq_len:]
+                    yield {'input_ids': input_ids}
+
+    def tokenize(self, data, buffer_size: int = 64):
+        buffer, states = [], []
+        for sample in data:
+            if 'text' in sample:
+                buffer.append(sample['text'])
+            elif 'context' in sample:
+                buffer.append(sample['context'])
+            else:
+                raise ValueError(f"No 'text' or 'context' field found in sample:\n{sample}")
+            states.append(self.data.state_dict())
+            if len(buffer) == buffer_size:
+                for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
+                    self.states = s
+                    yield tokenized
+                buffer, states = [], []
+        if len(buffer) > 0:
+            for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
+                self.states = s
+                yield tokenized
+
+    def state_dict(self):
+        return {
+            'states': self.states,
+            'tokens': deepcopy(self.tokens)
+        }
+
+    def load_state_dict(self, state_dict):
+        self.states = state_dict['states']
+        self.tokens = deepcopy(state_dict['tokens'])
+
+
+class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExamplesIterable):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _init_state_dict(self) -> dict:
+        self._state_dict = self.ex_iterable._init_state_dict()
+        self._state_dict['mem_buffer'] = ([],)
+        self._state_dict['gloabl_example_index'] = 0
+        return self._state_dict
+
+    def __iter__(self):
+        buffer_size = self.buffer_size
+        rng = deepcopy(self.generator)
+        indices_iterator = self._iter_random_indices(rng, buffer_size)
+        # this is the shuffle buffer that we keep in memory
+        mem_buffer = self._state_dict['mem_buffer'][0]
+        gloabl_example_index_start = self._state_dict["gloabl_example_index"] if self._state_dict else 0
+        # skip already consumed ones
+        for i in range(gloabl_example_index_start):
+            _ = next(indices_iterator)
+        for x in self.ex_iterable:
+            if len(mem_buffer) == buffer_size:  # if the buffer is full, pick and example from it
+                i = next(indices_iterator)
+                if self._state_dict:
+                    self._state_dict['gloabl_example_index'] += 1
+                yield mem_buffer[i]
+                mem_buffer[i] = x  # replace the picked example by a new one
+            else:  # otherwise, keep filling the buffer
+                mem_buffer.append(x)
+        # when we run out of examples, we shuffle the remaining examples in the buffer and yield them
+        rng.shuffle(mem_buffer)
+        yield from mem_buffer
+
+    def shuffle_data_sources(self, generator: np.random.Generator) -> BufferShuffledExamplesIterable:
+        """Shuffle the wrapped examples iterable as well as the shuffling buffer."""
+        return BufferShuffledExamplesIterable(
+            self.ex_iterable.shuffle_data_sources(generator), buffer_size=self.buffer_size, generator=generator
+        )
+
+    def shard_data_sources(self, worker_id: int, num_workers: int) -> BufferShuffledExamplesIterable:
+        """Keep only the requested shard."""
+        return BufferShuffledExamplesIterable(
+            self.ex_iterable.shard_data_sources(worker_id, num_workers),
+            buffer_size=self.buffer_size,
+            generator=self.generator,
+        )
+
+    def load_state_dict(self, state_dict: dict) -> dict:
+        def _inner_load_state_dict(state, new_state):
+            if new_state is not None and isinstance(state, dict):
+                for key in state:
+                    state[key] = _inner_load_state_dict(state[key], new_state[key])
+                return state
+            elif new_state is not None and isinstance(state, list):
+                for i in range(len(state)):
+                    state[i] = _inner_load_state_dict(state[i], new_state[i])
+                return state
+            return new_state
+
+        return _inner_load_state_dict(self._state_dict, state_dict)
+
+
+def shuffle(
+    dataset: IterableDataset,
+    seed: int = 42,
+    generator: np.random.Generator = None,
+    buffer_size: int = 1024,
+):
+    logger.info(f"Shuffling the dataset with seed {seed}...")
+    generator = np.random.default_rng(seed) if generator is None else deepcopy(generator)
+    return IterableDataset(
+        ex_iterable=BufferShuffledExamplesIterable(
+            dataset._ex_iterable, buffer_size=buffer_size, generator=generator
+        ).shuffle_data_sources(generator),
+        info=dataset._info.copy(),
+        split=dataset._split,
+        formatting=dataset._formatting,
+        shuffling=ShufflingConfig(generator=generator, _original_seed=seed),
+        distributed=copy.deepcopy(dataset._distributed),
+        token_per_repo_id=dataset._token_per_repo_id
+    )
 
 
 @dataclass
@@ -324,7 +478,7 @@ def build_dataloader(
     persistent_workers: bool = False,
     snapshot_every_n_steps: Optional[int] = 1
 ):
-    dataset = BufferShuffledIterableDataset(
+    dataset = OnlineTokenizedIterableDataset(
         dataset=dataset,
         tokenizer=tokenizer,
         seq_len=seq_len,
