@@ -198,12 +198,12 @@ class OnlineTokenizedIterableDataset(IterableDataset):
     def tokenize(self, data, buffer_size: int = 64):
         buffer, states = [], []
         for sample in data:
-            if 'text' in sample:
+            if sample.get('text', None) is not None:
                 buffer.append(sample['text'])
-            elif 'context' in sample:
-                buffer.append(sample['context'])
+            elif sample.get('content', None) is not None:
+                buffer.append(sample['content'])
             else:
-                raise ValueError(f"No 'text' or 'context' field found in sample:\n{sample}")
+                raise ValueError(f"No 'text' or 'content' field found in sample:\n{sample}")
             states.append(self.data.state_dict())
             if len(buffer) == buffer_size:
                 for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
