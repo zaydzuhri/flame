@@ -228,6 +228,12 @@ class JobConfig:
             help="Dataset split to use"
         )
         self.parser.add_argument(
+            "--training.data_files",
+            type=str,
+            default=None,
+            help="Data files to use"
+        )
+        self.parser.add_argument(
             "--training.num_workers",
             type=int,
             default=32,

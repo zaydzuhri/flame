@@ -9,6 +9,7 @@ print_args = true
 [training]
 batch_size = 32
 seq_len = 2048
+context_len = 2048
 warmup_steps = 1024
 gradient_accumulation_steps = 1
 steps = 20480

@@ -92,6 +92,7 @@ def main(job_config: JobConfig):
     dataset = load_dataset(
         path=job_config.training.dataset,
         name=getattr(job_config.training, "dataset_name", None),
+        data_files=getattr(job_config.training, "data_files", None),
         split=job_config.training.dataset_split,
         trust_remote_code=True,
         streaming=True
