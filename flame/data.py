@@ -17,23 +17,23 @@ from transformers import PreTrainedTokenizer
 from torchtitan.logging import logger
 
 
-class HuggingfaceDataset(IterableDataset):
+class BufferShuffledIterableDataset(IterableDataset):
 
     def __init__(
         self,
         dataset: Dataset,
         tokenizer: PreTrainedTokenizer,
-        context_len: int = 2048,
+        seq_len: int = 2048,
         rank: int = 0,
         world_size: int = 1,
         buffer_size: int = 1024
-    ) -> HuggingfaceDataset:
+    ) -> BufferShuffledIterableDataset:
 
         self.dataset = dataset
         self.tokenizer = tokenizer
 
         self.data = dataset.shard(world_size, rank)
-        self.context_len = context_len
+        self.seq_len = seq_len
         self.rank = rank
         self.world_size = world_size
         self.buffer_size = buffer_size
@@ -63,24 +63,24 @@ class HuggingfaceDataset(IterableDataset):
             self.data.load_state_dict(self.states)
 
         # max number of tokens allowed in the chunk buffer
-        n_tokens = self.buffer_size * self.context_len
+        n_tokens = self.buffer_size * self.seq_len
 
         while True:
             for sample in self.tokenize(self.data):
                 # keep appending the samples to the token buffer
                 self.tokens += sample
                 # if the token buffer is full, start sampling
-                # NOTE: we first convert the token ids to a tensor of shape [n_chunks, context_len] for efficiency
+                # NOTE: we first convert the token ids to a tensor of shape [n_chunks, seq_len] for efficiency
                 if len(self.buffer) == 0 and len(self.tokens) >= n_tokens:
                     self.buffer = torch.tensor(self.tokens[:n_tokens], dtype=self.dtype).view(self.buffer_size, -1)
                     self.tokens = self.tokens[n_tokens:]
                 if len(self.buffer) == self.buffer_size:
                     yield from self.sample(rand_it)
 
-            n_chunks = len(self.tokens) // self.context_len
+            n_chunks = len(self.tokens) // self.seq_len
             # handle the left tokens in the buffer
             if n_chunks > 0:
-                n_tokens = n_chunks * self.context_len
+                n_tokens = n_chunks * self.seq_len
                 indices = torch.randperm(n_chunks, generator=g).tolist()
                 self.buffer = torch.tensor(self.tokens[:n_tokens], dtype=torch.long).view(n_chunks, -1)
                 self.tokens = self.tokens[n_tokens:]
@@ -103,11 +103,11 @@ class HuggingfaceDataset(IterableDataset):
                 yield tokenized
 
     def sample(self, indices):
-        n_tokens = (len(self.tokens) // self.context_len) * self.context_len
+        n_tokens = (len(self.tokens) // self.seq_len) * self.seq_len
         while self.token_id < n_tokens:
             i = next(indices)
-            start, end = self.token_id, self.token_id + self.context_len
-            self.token_id += self.context_len
+            start, end = self.token_id, self.token_id + self.seq_len
+            self.token_id += self.seq_len
             yield {'input_ids': self.buffer[i].to(torch.long)}
             self.buffer[i] = torch.tensor(self.tokens[start:end], dtype=self.dtype)
         self.token_id = 0
@@ -324,7 +324,13 @@ def build_dataloader(
     persistent_workers: bool = False,
     snapshot_every_n_steps: Optional[int] = 1
 ):
-    dataset = HuggingfaceDataset(dataset, tokenizer, seq_len, rank, world_size)
+    dataset = BufferShuffledIterableDataset(
+        dataset=dataset,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        rank=rank,
+        world_size=world_size
+    )
     return DPAwareDataLoader(
         rank=rank,
         dataset=dataset,
