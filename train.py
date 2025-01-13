@@ -18,7 +18,8 @@ import fla  # noqa
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
 from flame.config_manager import JobConfig
-from flame.data import DataCollatorForLanguageModeling, build_dataloader
+from flame.data import (DataCollatorForLanguageModeling, build_dataloader,
+                        shuffle)
 from flame.metrics import build_device_memory_monitor, build_metric_logger
 from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
@@ -95,6 +96,7 @@ def main(job_config: JobConfig):
         trust_remote_code=True,
         streaming=True
     )
+    dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info(f"{dataset}")
     logger.info("Building dataloader...")
     collator = DataCollatorForLanguageModeling(
@@ -142,7 +144,7 @@ def main(job_config: JobConfig):
         model_config,
         job_config.training.seq_len,
     )
-    logger.info(f"{color.blue}Model\n{model}\n")
+    logger.info(f"{color.blue}Model\n{model}{color.reset}\n")
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
     if job_config.checkpoint.create_seed_checkpoint:
@@ -339,7 +341,7 @@ def main(job_config: JobConfig):
             # optimizer step
             checkpoint.maybe_wait_for_staging()
             if job_config.training.skip_nan_inf and (grad_norm.isnan() or grad_norm.isinf()):
-                logger.warning(f"Skipping optimizer step - detected invalid gradient norm: {grad_norm:.4f} (NaN={grad_norm.isnan()}, Inf={grad_norm.isinf()})")
+                logger.warning(f"Skipping optimizer step - detected invalid gradient norm: {grad_norm:.4f}")
                 optimizers.zero_grad()
                 train_state.skipped_step += 1
             else:

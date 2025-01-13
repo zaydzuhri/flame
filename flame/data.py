@@ -266,10 +266,10 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
             self.ex_iterable.shuffle_data_sources(generator), buffer_size=self.buffer_size, generator=generator
         )
 
-    def shard_data_sources(self, worker_id: int, num_workers: int) -> BufferShuffledExamplesIterable:
+    def shard_data_sources(self, num_shards: int, index: int, contiguous=True) -> BufferShuffledExamplesIterable:
         """Keep only the requested shard."""
         return BufferShuffledExamplesIterable(
-            self.ex_iterable.shard_data_sources(worker_id, num_workers),
+            self.ex_iterable.shard_data_sources(num_shards, index, contiguous=contiguous),
             buffer_size=self.buffer_size,
             generator=self.generator,
         )
