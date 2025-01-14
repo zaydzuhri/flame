@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🔥 Flame: Flash linear attention made easy
+# 🔥 Flame: Flash Linear Attention Made Easy
+
+A minimal, efficient training framework for Flash Linear Attention models
 
 </div>
-
-A minimal training framework for scaling FLA models.
 
 ## Usage
 
