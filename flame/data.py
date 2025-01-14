@@ -166,6 +166,7 @@ class OnlineTokenizedIterableDataset(IterableDataset):
         dataset: Dataset,
         tokenizer: PreTrainedTokenizer,
         seq_len: int = 2048,
+        min_len: int = None,
         rank: int = 0,
         world_size: int = 1
     ) -> OnlineTokenizedIterableDataset:
@@ -175,6 +176,7 @@ class OnlineTokenizedIterableDataset(IterableDataset):
 
         self.data = dataset.shard(world_size, rank)
         self.seq_len = seq_len
+        self.min_len = min_len
         self.rank = rank
         self.world_size = world_size
 
@@ -208,12 +210,14 @@ class OnlineTokenizedIterableDataset(IterableDataset):
             if len(buffer) == buffer_size:
                 for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
                     self.states = s
-                    yield tokenized
+                    if self.min_len is None or len(tokenized) >= self.min_len:
+                        yield tokenized
                 buffer, states = [], []
         if len(buffer) > 0:
             for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
                 self.states = s
-                yield tokenized
+                if self.min_len is None or len(tokenized) >= self.min_len:
+                    yield tokenized
 
     def state_dict(self):
         return {
@@ -472,7 +476,9 @@ def build_dataloader(
     tokenizer: PreTrainedTokenizer,
     batch_size: int,
     seq_len: int,
-    collate_fn: Callable,
+    min_len: int,
+    varlen: bool,
+    context_len: int,
     num_workers: int = 0,
     pin_memory: bool = False,
     persistent_workers: bool = False,
@@ -482,6 +488,7 @@ def build_dataloader(
         dataset=dataset,
         tokenizer=tokenizer,
         seq_len=seq_len,
+        min_len=min_len,
         rank=rank,
         world_size=world_size
     )
@@ -489,7 +496,7 @@ def build_dataloader(
         rank=rank,
         dataset=dataset,
         batch_size=batch_size,
-        collate_fn=collate_fn,
+        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, varlen=varlen, context_len=context_len),
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,

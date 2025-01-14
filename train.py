@@ -18,8 +18,7 @@ import fla  # noqa
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
 from flame.config_manager import JobConfig
-from flame.data import (DataCollatorForLanguageModeling, build_dataloader,
-                        shuffle)
+from flame.data import build_dataloader, shuffle
 from flame.metrics import build_device_memory_monitor, build_metric_logger
 from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
@@ -100,11 +99,6 @@ def main(job_config: JobConfig):
     dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info(f"{dataset}")
     logger.info("Building dataloader...")
-    collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        varlen=job_config.training.varlen,
-        context_len=job_config.training.context_len
-    )
     dataloader = build_dataloader(
         rank=dp_rank,
         world_size=dp_degree,
@@ -112,7 +106,9 @@ def main(job_config: JobConfig):
         tokenizer=tokenizer,
         batch_size=job_config.training.batch_size,
         seq_len=job_config.training.seq_len,
-        collate_fn=collator,
+        min_len=job_config.training.min_len,
+        varlen=job_config.training.varlen,
+        context_len=job_config.training.context_len,
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
