@@ -176,7 +176,7 @@ class JobConfig:
             "--training.context_len", type=int, default=2048, help="Max length allowed for each sequence"
         )
         self.parser.add_argument(
-            "--training.min_len", type=int, default=16, help="Min length allowed for each sequence"
+            "--training.min_len", type=int, default=0, help="Min length allowed for each sequence"
         )
         self.parser.add_argument(
             "--training.varlen",
