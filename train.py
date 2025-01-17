@@ -94,7 +94,7 @@ def main(job_config: JobConfig):
         data_files=getattr(job_config.training, "data_files", None),
         split=job_config.training.dataset_split,
         trust_remote_code=True,
-        streaming=True
+        streaming=job_config.training.streaming
     )
     dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info(f"{dataset}")

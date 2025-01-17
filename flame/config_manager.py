@@ -237,6 +237,11 @@ class JobConfig:
             help="Data files to use"
         )
         self.parser.add_argument(
+            "--training.streaming",
+            action="store_true",
+            help="Whether to load dataset in streaming mode, used for huge dataset",
+        )
+        self.parser.add_argument(
             "--training.num_workers",
             type=int,
             default=32,
