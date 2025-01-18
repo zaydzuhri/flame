@@ -87,7 +87,9 @@ def main(job_config: JobConfig):
     logger.info("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(job_config.model.tokenizer_path, trust_remote_code=True)
     logger.info(f"{tokenizer}")
-    logger.info("Loading dataset...")
+    logger.info(f"Loading dataset {job_config.training.dataset}"
+                f":{job_config.training.dataset_name}" if job_config.training.dataset_name is not None else "")
+
     dataset = load_dataset(
         path=job_config.training.dataset,
         name=getattr(job_config.training, "dataset_name", None),
@@ -96,8 +98,9 @@ def main(job_config: JobConfig):
         trust_remote_code=True,
         streaming=job_config.training.streaming
     )
-    dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info(f"{dataset}")
+    logger.info(f"Shuffling dataset with seed {job_config.training.seed}")
+    dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info("Building dataloader...")
     dataloader = build_dataloader(
         rank=dp_rank,
@@ -128,6 +131,7 @@ def main(job_config: JobConfig):
         model = AutoModelForCausalLM.from_config(model_config)
         # defer weight initialization until after parallelisms are applied
         model.apply(lambda m: setattr(m, '_is_hf_initialized', False))
+    logger.info(f"{color.blue}\n{model}{color.reset}\n")
 
     # a no-op hander if float8 is not enabled
     float8_handler = Float8Handler(job_config, parallel_dims)
@@ -141,7 +145,6 @@ def main(job_config: JobConfig):
         model_config,
         job_config.training.seq_len,
     )
-    logger.info(f"{color.blue}Model\n{model}{color.reset}\n")
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
     if job_config.checkpoint.create_seed_checkpoint:
@@ -246,7 +249,7 @@ def main(job_config: JobConfig):
     global_batch_size = job_config.training.batch_size * dp_degree * job_config.training.gradient_accumulation_steps
     num_tokens_per_step = global_batch_size * job_config.training.seq_len
     # train loop
-    logger.info(f"{color.red}***** Running training *****")
+    logger.info(f"{color.red}***** Running training *****{color.reset}")
     logger.info(f"{color.green}  Training starts at step {train_state.step + 1}")
     logger.info(f"{color.green}  Number of tokens per sequence = {job_config.training.seq_len:,}")
     logger.info(f"{color.green}  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}")
