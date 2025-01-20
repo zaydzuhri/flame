@@ -324,9 +324,9 @@ class DataCollatorForLanguageModeling:
             The tokenizer used for encoding the data.
         varlen (`bool`):
             Whether to return sequences with variable lengths.
-            If `True`, the offsets indicating the start and end of each sequence will be returned.
+            If `True`, the `cu_seqlens` indicating the start and end of each sequence will be returned.
             For example, if the sequence lengths are `[4, 8, 12]`,
-            the returned `input_ids` will be a long flattened tensor of shape `[1, 24]`, with `offsets` being `[0, 4, 12, 24]`.
+            the returned `input_ids` will be a long flattened tensor of shape `[1, 24]`, with `cu_seqlens` being `[0, 4, 12, 24]`.
             If `False`, the `input_ids` with shape `[batch_size, seq_len]` will be returned directly.
         context_len (`int`):
             The maximum allowed length for each sequence.
@@ -336,7 +336,7 @@ class DataCollatorForLanguageModeling:
         A dictionary with the following keys:
         - `input_ids`: A tensor of shape `[batch_size, seq_len]` containing the input ids.
         - `labels`: A tensor of shape `[batch_size, seq_len]` containing the labels.
-        - `offsets`: A tensor containing the start and end positions of each sequence.
+        - `cu_seqlens`: A tensor containing the start and end positions of each sequence.
 
     NOTE: When in variable length mode, the `batch_size` must be 1.
     """
@@ -354,7 +354,7 @@ class DataCollatorForLanguageModeling:
 
         def tensorize(example: Dict[str, Any]) -> Dict[str, Any]:
             tensorized = {}
-            for key in ['input_ids', 'offsets']:
+            for key in ['input_ids', 'cu_seqlens']:
                 if key not in example:
                     continue
                 if isinstance(example[key], List):
@@ -388,29 +388,29 @@ class DataCollatorForLanguageModeling:
             batch = {
                 'input_ids': torch.cat([example['input_ids'] for example in examples], dim=0).unsqueeze(0)
             }
-            if 'offsets' in examples[0]:
-                batch['offsets'] = torch.cat([example['offsets'] for example in examples], dim=0).unsqueeze(0)
+            if 'cu_seqlens' in examples[0]:
+                batch['cu_seqlens'] = torch.cat([example['cu_seqlens'] for example in examples], dim=0).unsqueeze(0)
             else:
                 # determine boundaries by bos/eos positions
                 if self.tokenizer.add_bos_token:
-                    offsets = []
+                    cu_seqlens = []
                     if batch['input_ids'][0, 0] != self.tokenizer.bos_token_id:
-                        offsets.append(torch.tensor([0]))
-                    offsets.append(torch.where(batch['input_ids'].eq(self.tokenizer.bos_token_id))[1])
-                    offsets.append(torch.tensor([len(batch['input_ids'][0])]))
-                    batch['offsets'] = torch.cat(offsets, dim=0).to(dtype=torch.int32)
+                        cu_seqlens.append(torch.tensor([0]))
+                    cu_seqlens.append(torch.where(batch['input_ids'].eq(self.tokenizer.bos_token_id))[1])
+                    cu_seqlens.append(torch.tensor([len(batch['input_ids'][0])]))
+                    batch['cu_seqlens'] = torch.cat(cu_seqlens, dim=0).to(dtype=torch.int32)
                 elif self.tokenizer.add_eos_token:
-                    offsets = [torch.tensor([0])]
-                    offsets.append(torch.where(batch['input_ids'].eq(self.tokenizer.eos_token_id))[1] + 1)
+                    cu_seqlens = [torch.tensor([0])]
+                    cu_seqlens.append(torch.where(batch['input_ids'].eq(self.tokenizer.eos_token_id))[1] + 1)
                     if batch['input_ids'][0, -1] != self.tokenizer.eos_token_id:
-                        offsets.append(torch.tensor([len(batch['input_ids'][0])]))
-                    batch['offsets'] = torch.cat(offsets, dim=0).to(dtype=torch.int32)
+                        cu_seqlens.append(torch.tensor([len(batch['input_ids'][0])]))
+                    batch['cu_seqlens'] = torch.cat(cu_seqlens, dim=0).to(dtype=torch.int32)
                 else:
                     raise ValueError("You must allow the tokenizer to add either a bos or eos token as separators.")
             if self.context_len is not None:
-                bos = batch['offsets'][:-1].tolist()
-                eos = batch['offsets'][1:].tolist()
-                batch['offsets'] = torch.cat(
+                bos = batch['cu_seqlens'][:-1].tolist()
+                eos = batch['cu_seqlens'][1:].tolist()
+                batch['cu_seqlens'] = torch.cat(
                     [torch.arange(i, j, self.context_len) for i, j in zip(bos, eos)] +
                     [torch.tensor([len(batch['input_ids'][0])])]
                 ).to(dtype=torch.int32)
