@@ -96,8 +96,20 @@ def main(job_config: JobConfig):
         data_files=getattr(job_config.training, "data_files", None),
         split=job_config.training.dataset_split,
         trust_remote_code=True,
-        streaming=job_config.training.streaming
+        streaming=job_config.training.streaming,
+        num_proc=job_config.training.num_workers if not job_config.training.streaming else None
     )
+    if not job_config.training.streaming:
+        dataset = dataset.to_iterable_dataset(num_shards=dp_degree*job_config.training.num_workers)
+    else:
+        min_required_shards = dp_degree * job_config.training.num_workers
+        if dataset.num_shards < min_required_shards:
+            logger.warning(
+                f"Dataset has too few shards ({dataset.num_shards}) for the requested configuration "
+                f"which requires at least {min_required_shards} shards "
+                f"({dp_degree} data parallel degree × {job_config.training.num_workers} workers). "
+                f"To fix this, disable streaming mode to allow full dataset sharding."
+            )
     logger.info(f"{dataset}")
     logger.info(f"Shuffling dataset with seed {job_config.training.seed}")
     dataset = shuffle(dataset, seed=job_config.training.seed)
@@ -285,7 +297,7 @@ def main(job_config: JobConfig):
 
                 input_ids = input_ids.to(device_type)
                 labels = labels.to(device_type)
-                offsets = batch['offsets'].to(device_type) if 'offsets' in batch else None
+                cu_seqlens = batch['cu_seqlens'].to(device_type) if 'cu_seqlens' in batch else None
                 # apply context parallelism if cp is enabled
                 optional_context_parallel_ctx = (
                     utils.create_context_parallel_ctx(
@@ -321,7 +333,7 @@ def main(job_config: JobConfig):
                 else:
                     # Non-PP forward / backward
                     with train_context(optional_context_parallel_ctx):
-                        output = model(input_ids=input_ids, labels=labels, offsets=offsets)
+                        output = model(input_ids=input_ids, labels=labels, cu_seqlens=cu_seqlens)
                         loss = output.loss
                         loss.backward()
                 losses.append(loss)
