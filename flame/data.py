@@ -37,6 +37,7 @@ class BufferShuffledIterableDataset(IterableDataset):
 
         self.data = dataset.shard(world_size, rank)
         self.seq_len = seq_len
+
         self.rank = rank
         self.world_size = world_size
         self.buffer_size = buffer_size
@@ -166,7 +167,6 @@ class OnlineTokenizedIterableDataset(IterableDataset):
         dataset: Dataset,
         tokenizer: PreTrainedTokenizer,
         seq_len: int = 2048,
-        min_len: int = None,
         rank: int = 0,
         world_size: int = 1
     ) -> OnlineTokenizedIterableDataset:
@@ -176,7 +176,6 @@ class OnlineTokenizedIterableDataset(IterableDataset):
 
         self.data = dataset.shard(world_size, rank)
         self.seq_len = seq_len
-        self.min_len = min_len
         self.rank = rank
         self.world_size = world_size
 
@@ -210,14 +209,12 @@ class OnlineTokenizedIterableDataset(IterableDataset):
             if len(buffer) == buffer_size:
                 for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
                     self.states = s
-                    if self.min_len is None or len(tokenized) >= self.min_len:
-                        yield tokenized
+                    yield tokenized
                 buffer, states = [], []
         if len(buffer) > 0:
             for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
                 self.states = s
-                if self.min_len is None or len(tokenized) >= self.min_len:
-                    yield tokenized
+                yield tokenized
 
     def state_dict(self):
         return {
@@ -238,28 +235,38 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
     def _init_state_dict(self) -> dict:
         self._state_dict = self.ex_iterable._init_state_dict()
         self._state_dict['mem_buffer'] = ([],)
-        self._state_dict['gloabl_example_index'] = 0
+        self._state_dict['bit_generator_state'] = self.generator.bit_generator.state
+        self._state_dict['bit_generator_index_offset'] = 0
         return self._state_dict
 
     def __iter__(self):
         buffer_size = self.buffer_size
         rng = deepcopy(self.generator)
-        indices_iterator = self._iter_random_indices(rng, buffer_size)
         # this is the shuffle buffer that we keep in memory
         mem_buffer = self._state_dict['mem_buffer'][0]
-        gloabl_example_index_start = self._state_dict["gloabl_example_index"] if self._state_dict else 0
+        # this is an infinite iterator that randomly samples the index of the source to pick examples from
+        index_offset = self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
+        if self._state_dict:
+            rng.bit_generator.state = self._state_dict["bit_generator_state"]
+        indices_iterator = self._iter_random_indices(rng, buffer_size)
         # skip already consumed ones
-        for i in range(gloabl_example_index_start):
-            _ = next(indices_iterator)
+        for _ in range(index_offset):
+            i = next(indices_iterator)
+
         for x in self.ex_iterable:
-            if len(mem_buffer) == buffer_size:  # if the buffer is full, pick and example from it
-                i = next(indices_iterator)
-                if self._state_dict:
-                    self._state_dict['gloabl_example_index'] += 1
-                yield mem_buffer[i]
-                mem_buffer[i] = x  # replace the picked example by a new one
-            else:  # otherwise, keep filling the buffer
+            if len(mem_buffer) < buffer_size:  # if the buffer is not full, keep filling the buffer
                 mem_buffer.append(x)
+            else:  # otherwise, pick an example from it
+                i = next(indices_iterator)
+                index_offset = (index_offset + 1) % buffer_size
+                if self._state_dict:
+                    self._state_dict["bit_generator_index_offset"] = index_offset
+                    if index_offset == 0:
+                        self._state_dict["bit_generator_state"] = rng.bit_generator.state
+                selected = mem_buffer[i]
+                mem_buffer[i] = x  # replace the picked example by a new one
+                yield selected
+
         # when we run out of examples, we shuffle the remaining examples in the buffer and yield them
         rng.shuffle(mem_buffer)
         yield from mem_buffer
@@ -322,14 +329,14 @@ class DataCollatorForLanguageModeling:
     Args:
         tokenizer ([`PreTrainedTokenizer`] or [`PreTrainedTokenizerFast`]):
             The tokenizer used for encoding the data.
+        context_len (`int`):
+            The maximum allowed length for each sequence.
+            When `varlen=True`, longer sequences will be split into multiple chunks of at most this length.
         varlen (`bool`):
             Whether to return sequences with variable lengths.
             If `True`, the `cu_seqlens` indicating the start and end of each sequence will be returned.
             For example, if the sequence lengths are `[4, 8, 12]`,
             the returned `input_ids` will be a flattened tensor of shape `[1, 24]`, with `cu_seqlens` being `[0, 4, 12, 24]`.
-        context_len (`int`):
-            The maximum allowed length for each sequence.
-            When `varlen=True`, longer sequences will be split into multiple chunks of at most this length.
 
     Returns:
         A dictionary with the following keys:
@@ -341,8 +348,8 @@ class DataCollatorForLanguageModeling:
     """
 
     tokenizer: PreTrainedTokenizer
-    varlen: bool = False
     context_len: Optional[int] = None
+    varlen: bool = False
 
     def __call__(
         self,
@@ -469,15 +476,14 @@ class DPAwareDataLoader(StatefulDataLoader, Stateful):
 
 
 def build_dataloader(
-    rank: int,
-    world_size: int,
     dataset: IterableDataset,
     tokenizer: PreTrainedTokenizer,
+    rank: int,
+    world_size: int,
     batch_size: int,
     seq_len: int,
-    min_len: int,
-    varlen: bool,
-    context_len: int,
+    context_len: Optional[int] = None,
+    varlen: bool = False,
     num_workers: int = 0,
     pin_memory: bool = False,
     persistent_workers: bool = False,
@@ -487,7 +493,6 @@ def build_dataloader(
         dataset=dataset,
         tokenizer=tokenizer,
         seq_len=seq_len,
-        min_len=min_len,
         rank=rank,
         world_size=world_size
     )
@@ -495,7 +500,7 @@ def build_dataloader(
         rank=rank,
         dataset=dataset,
         batch_size=batch_size,
-        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, varlen=varlen, context_len=context_len),
+        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, context_len=context_len, varlen=varlen),
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,

@@ -115,15 +115,14 @@ def main(job_config: JobConfig):
     dataset = shuffle(dataset, seed=job_config.training.seed)
     logger.info("Building dataloader...")
     dataloader = build_dataloader(
-        rank=dp_rank,
-        world_size=dp_degree,
         dataset=dataset,
         tokenizer=tokenizer,
+        rank=dp_rank,
+        world_size=dp_degree,
         batch_size=job_config.training.batch_size,
         seq_len=job_config.training.seq_len,
-        min_len=job_config.training.min_len,
-        varlen=job_config.training.varlen,
         context_len=job_config.training.context_len,
+        varlen=job_config.training.varlen,
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
