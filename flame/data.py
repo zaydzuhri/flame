@@ -121,14 +121,14 @@ class BufferShuffledIterableDataset(IterableDataset):
         self,
         low: int,
         high: int,
-        batch_size: int = 1024,
+        buffer_size: int = 1024,
         g: torch.Generator = torch.Generator()
     ) -> Iterable[int]:
-        indices = torch.empty(batch_size, dtype=torch.long)
+        indices = torch.empty(buffer_size, dtype=torch.long)
         while True:
             # record the generator states before sampling
             self.rng_state = g.get_state()
-            indices = torch.randint(low, high, (batch_size,), out=indices, generator=g)
+            indices = torch.randint(low, high, (buffer_size,), out=indices, generator=g)
             for i in indices[self.rand_id:].tolist():
                 self.rand_id += 1
                 yield i
@@ -248,7 +248,7 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
         index_offset = self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
         if self._state_dict:
             rng.bit_generator.state = self._state_dict["bit_generator_state"]
-        indices_iterator = self._iter_random_indices(rng, buffer_size)
+        indices_iterator = self._iter_random_indices(rng, buffer_size, random_batch_size=buffer_size)
         # skip already consumed ones
         for _ in range(index_offset):
             i = next(indices_iterator)
