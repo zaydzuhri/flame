@@ -304,7 +304,7 @@ def shuffle(
     return IterableDataset(
         ex_iterable=BufferShuffledExamplesIterable(
             dataset._ex_iterable, buffer_size=buffer_size, generator=generator
-        ).shuffle_data_sources(generator),
+        ),
         info=dataset._info.copy(),
         split=dataset._split,
         formatting=dataset._formatting,
@@ -326,8 +326,7 @@ class DataCollatorForLanguageModeling:
             Whether to return sequences with variable lengths.
             If `True`, the `cu_seqlens` indicating the start and end of each sequence will be returned.
             For example, if the sequence lengths are `[4, 8, 12]`,
-            the returned `input_ids` will be a long flattened tensor of shape `[1, 24]`, with `cu_seqlens` being `[0, 4, 12, 24]`.
-            If `False`, the `input_ids` with shape `[batch_size, seq_len]` will be returned directly.
+            the returned `input_ids` will be a flattened tensor of shape `[1, 24]`, with `cu_seqlens` being `[0, 4, 12, 24]`.
         context_len (`int`):
             The maximum allowed length for each sequence.
             When `varlen=True`, longer sequences will be split into multiple chunks of at most this length.
