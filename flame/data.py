@@ -267,9 +267,15 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
                 mem_buffer[i] = x  # replace the picked example by a new one
                 yield selected
 
+        index_offset = self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
+        if self._state_dict:
+            rng.bit_generator.state = self._state_dict["bit_generator_state"]
+
         # when we run out of examples, we shuffle the remaining examples in the buffer and yield them
-        rng.shuffle(mem_buffer)
-        yield from mem_buffer
+        for i in rng.permutation(len(mem_buffer))[index_offset:].tolist():
+            if self._state_dict:
+                self._state_dict["bit_generator_index_offset"] = i + 1
+            yield mem_buffer[i]
 
     def shuffle_data_sources(self, generator: np.random.Generator) -> BufferShuffledExamplesIterable:
         """Shuffle the wrapped examples iterable as well as the shuffling buffer."""
@@ -288,7 +294,7 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
     def load_state_dict(self, state_dict: dict) -> dict:
         def _inner_load_state_dict(state, new_state):
             if new_state is not None and isinstance(state, dict):
-                for key in state:
+                for key in new_state:
                     state[key] = _inner_load_state_dict(state[key], new_state[key])
                 return state
             elif new_state is not None and isinstance(state, list):
