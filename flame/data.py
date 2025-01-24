@@ -237,6 +237,7 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
         self._state_dict['mem_buffer'] = ([],)
         self._state_dict['bit_generator_state'] = self.generator.bit_generator.state
         self._state_dict['bit_generator_index_offset'] = 0
+        self._state_dict['bit_generator_index_offset_shuffle'] = 0
         return self._state_dict
 
     def __iter__(self):
@@ -267,14 +268,14 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
                 mem_buffer[i] = x  # replace the picked example by a new one
                 yield selected
 
-        index_offset = self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
+        index_offset = self._state_dict["bit_generator_index_offset_shuffle"] if self._state_dict else 0
         if self._state_dict:
             rng.bit_generator.state = self._state_dict["bit_generator_state"]
 
         # when we run out of examples, we shuffle the remaining examples in the buffer and yield them
         for i in rng.permutation(len(mem_buffer))[index_offset:].tolist():
             if self._state_dict:
-                self._state_dict["bit_generator_index_offset"] = i + 1
+                self._state_dict["bit_generator_index_offset_shuffle"] = i + 1
             yield mem_buffer[i]
 
     def shuffle_data_sources(self, generator: np.random.Generator) -> BufferShuffledExamplesIterable:
