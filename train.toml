@@ -33,6 +33,7 @@ varlen = false
 name = "AdamW"
 fused = true
 lr = 3e-4
+min_lr_ratio = 0.1
 scheduler = 'wsd'
 
 [checkpoint]

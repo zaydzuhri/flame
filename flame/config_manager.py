@@ -187,6 +187,12 @@ class JobConfig:
             help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
         )
         self.parser.add_argument(
+            "--training.min_lr_ratio",
+            type=float,
+            default=0.1,
+            help="Min lr ratio for lr scheduler",
+        )
+        self.parser.add_argument(
             "--training.gradient_accumulation_steps",
             type=int,
             default=1,
