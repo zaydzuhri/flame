@@ -142,9 +142,6 @@ class JobConfig:
             "--optimizer.name", type=str, default="AdamW", help="Optimizer to use"
         )
         self.parser.add_argument(
-            "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
-        )
-        self.parser.add_argument(
             "--optimizer.fused",
             action="store_true",
             help="Whether the fused implementation(CUDA only) is used.",
@@ -155,6 +152,15 @@ class JobConfig:
             default="cosine",
             choices=["wsd", "cosine", "linear"],
             help="Scheduler to use. Currently supported: wsd, cosine, and linear.",
+        )
+        self.parser.add_argument(
+            "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
+        )
+        self.parser.add_argument(
+            "--optimizer.min_lr_ratio",
+            type=float,
+            default=0.1,
+            help="Min lr ratio for lr scheduler",
         )
         self.parser.add_argument(
             "--optimizer.early_step_in_backward",
@@ -185,12 +191,6 @@ class JobConfig:
             type=int,
             default=200,
             help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
-        )
-        self.parser.add_argument(
-            "--training.min_lr_ratio",
-            type=float,
-            default=0.1,
-            help="Min lr ratio for lr scheduler",
         )
         self.parser.add_argument(
             "--training.gradient_accumulation_steps",

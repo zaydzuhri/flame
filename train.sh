@@ -33,6 +33,7 @@ bash train.sh \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
   --optimizer.lr 3e-4 \
+  --optimizer.min_lr_ratio 0.1 \
   --optimizer.scheduler cosine \
   --training.batch_size 32 \
   --training.seq_len 2048 \
