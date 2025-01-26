@@ -20,6 +20,7 @@ from torch.distributed.tensor.parallel import (ColwiseParallel,
                                                RowwiseParallel,
                                                SequenceParallel,
                                                parallelize_module)
+
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.logging import logger
 from torchtitan.parallelisms.parallel_dims import ParallelDims
@@ -268,5 +269,4 @@ def apply_ddp(
 
     replicate(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
-    logger.info("Applied DDP to the model")
     logger.info("Applied DDP to the model")

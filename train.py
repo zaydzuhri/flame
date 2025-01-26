@@ -59,7 +59,9 @@ def main(job_config: JobConfig):
     )
     device = torch.device(f"{device_type}:{int(os.environ['LOCAL_RANK'])}")
     device_module.set_device(device)
+
     utils.init_distributed(job_config)
+
     # initialize device memory monitor and get peak flops for MFU calculation
     device_memory_monitor = build_device_memory_monitor()
     gpu_peak_flops = utils.get_peak_flops(device_memory_monitor.device_name)
@@ -249,7 +251,6 @@ def main(job_config: JobConfig):
     )
 
     # variables used to keep info for metrics logging
-    losses_since_last_log = []
     ntokens_since_last_log = 0
     data_loading_times = []
     time_last_log = time.perf_counter()
@@ -324,10 +325,11 @@ def main(job_config: JobConfig):
                             pp_schedule.step()
 
                     # accumulate losses across pipeline microbatches
+                    # TODO: PP+FSDP unexpectedly puts the loss back to the CPU
                     loss = (
-                        torch.mean(torch.stack(losses))
+                        torch.mean(torch.stack(losses)).to(device)
                         if is_last_stage
-                        else torch.Tensor([-1.0])
+                        else torch.tensor([-1.0], device=device)
                     )
                 else:
                     # Non-PP forward / backward
@@ -363,28 +365,27 @@ def main(job_config: JobConfig):
             # it issues a single all-reduce for all parameters at once for better performance
             float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
 
-            losses_since_last_log.append(loss)
-
             # log metrics
             if train_state.step == 1 or train_state.step % job_config.metrics.log_freq == 0:
-                losses = [loss.item() for loss in losses_since_last_log]
-                avg_loss, max_loss = sum(losses) / len(losses), max(losses)
                 if (
                     parallel_dims.dp_replicate_enabled
                     or parallel_dims.dp_shard_enabled
                     or parallel_dims.cp_enabled
                 ):
+                    loss = loss.detach()
                     global_avg_loss, global_max_loss = (
-                        utils.dist_mean(avg_loss, world_mesh["dp_cp"]),
-                        utils.dist_max(max_loss, world_mesh["dp_cp"]),
+                        utils.dist_mean(loss, world_mesh["dp_cp"]),
+                        utils.dist_max(loss, world_mesh["dp_cp"]),
                     )
                 else:
-                    global_avg_loss, global_max_loss = avg_loss, max_loss
+                    global_avg_loss = global_max_loss = loss.item()
 
                 time_delta = time.perf_counter() - time_last_log
 
                 # update train state
-                train_state.token += utils.dist_sum(ntokens_since_last_log, world_mesh["dp_cp"])
+                train_state.token += utils.dist_reduce(
+                    torch.tensor(ntokens_since_last_log, device=device), "sum", world_mesh["dp_cp"]
+                )
                 train_state.elapsed += timedelta(seconds=time_delta)
                 train_state.log_steps.append(train_state.step)
                 train_state.global_avg_losses.append(global_avg_loss)
@@ -435,7 +436,6 @@ def main(job_config: JobConfig):
                     f"{color.magenta}[{str(train_state.elapsed).split('.')[0]:>8}<{str(eta).split('.')[0]:>8}]{color.reset}"
                 )
 
-                losses_since_last_log.clear()
                 ntokens_since_last_log = 0
                 data_loading_times.clear()
                 time_last_log = time.perf_counter()
