@@ -107,10 +107,13 @@ def main(job_config: JobConfig):
         min_required_shards = dp_degree * job_config.training.num_workers
         if dataset.num_shards < min_required_shards:
             logger.warning(
+                f"{color.red}"
                 f"Dataset has too few shards ({dataset.num_shards}) for the requested configuration "
                 f"which requires at least {min_required_shards} shards "
                 f"({dp_degree} data parallel degree × {job_config.training.num_workers} workers). "
+                f"This could cause the program to hang. "
                 f"To fix this, disable streaming mode to allow full dataset sharding."
+                f"{color.reset}"
             )
     logger.info(f"{dataset}")
     logger.info(f"Shuffling dataset with seed {job_config.training.seed}")
