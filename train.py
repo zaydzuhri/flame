@@ -392,7 +392,7 @@ def main(job_config: JobConfig):
 
                 last_lr = lr_schedulers.schedulers[0].get_last_lr()[0]
                 # tokens per second per device, abbreviated as tgs
-                tgs = ntokens_since_last_log / time_delta * parallel_dims.non_data_parallel_size
+                tgs = ntokens_since_last_log / (time_delta * parallel_dims.non_data_parallel_size)
                 # model FLOPS utilization
                 # For its definition and calculation, please refer to the PaLM paper:
                 # httgs://arxiv.org/abs/2204.02311
