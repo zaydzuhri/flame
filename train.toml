@@ -21,7 +21,6 @@ tensor_parallel_degree = 1
 compile = false
 dataset = "HuggingFaceFW/fineweb-edu"
 dataset_name = "default"
-dataset_split = "train"
 num_workers = 32
 pin_memory = false
 persistent_workers = false
@@ -31,6 +30,7 @@ varlen = false
 
 [optimizer]
 name = "AdamW"
+eps = 1e-8
 fused = true
 lr = 3e-4
 min_lr_ratio = 0.1

@@ -32,6 +32,8 @@ bash train.sh \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
+  --optimizer.eps 1e-8 \
+  --optimizer.fused \
   --optimizer.lr 3e-4 \
   --optimizer.min_lr_ratio 0.1 \
   --optimizer.scheduler cosine \
@@ -65,8 +67,10 @@ cp -r flame   $path
 cp -r 3rdparty/flash-linear-attention/fla $path
 cp -r 3rdparty/torchtitan/torchtitan $path
 
-export TRANSFORMERS_OFFLINE=1
-export HF_DATASETS_OFFLINE=1
+# for offline systems
+# export TRANSFORMERS_OFFLINE=1
+# export HF_DATASETS_OFFLINE=1
+# export HF_HUB_OFFLINE=1
 if [ "$date" == "" ]; then
   date=$(date +%Y%m%d%H%M)
 fi

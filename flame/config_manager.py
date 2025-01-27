@@ -142,6 +142,12 @@ class JobConfig:
             "--optimizer.name", type=str, default="AdamW", help="Optimizer to use"
         )
         self.parser.add_argument(
+            "--optimizer.eps",
+            type=float,
+            default=1e-8,
+            help="Epsilon value for the optimizer.",
+        )
+        self.parser.add_argument(
             "--optimizer.fused",
             action="store_true",
             help="Whether the fused implementation(CUDA only) is used.",
@@ -217,27 +223,28 @@ class JobConfig:
         )
         self.parser.add_argument(
             "--training.dataset",
-            type=str,
             default="HuggingFaceFW/fineweb-edu",
-            help="Dataset to use"
+            help="Dataset to use, with comma separated values"
         )
         self.parser.add_argument(
             "--training.dataset_name",
-            type=str,
             default=None,
-            help="The name of the dataset config"
+            help="The name of the dataset config, with comma separated values if provided"
         )
         self.parser.add_argument(
             "--training.dataset_split",
-            type=str,
-            default="train",
-            help="Dataset split to use"
+            default=None,
+            help="Dataset split to use, with comma separated values if provided"
         )
         self.parser.add_argument(
             "--training.data_files",
-            type=str,
             default=None,
-            help="Data files to use"
+            help="Data files to use, with comma separated values if provided"
+        )
+        self.parser.add_argument(
+            "--training.data_probs",
+            default=None,
+            help="Data sampling probabilities, with comma separated values if provided"
         )
         self.parser.add_argument(
             "--training.streaming",

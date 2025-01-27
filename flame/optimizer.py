@@ -130,11 +130,13 @@ def build_optimizers(
     optim_in_bwd = job_config.optimizer.early_step_in_backward
     name = job_config.optimizer.name
     lr = job_config.optimizer.lr
+    eps = job_config.optimizer.eps
     fused = job_config.optimizer.fused
     optimizer_kwargs = {
         "lr": lr,
         "betas": (0.9, 0.95),
         "weight_decay": 0.1,
+        "eps": eps,
         "fused": fused,
         "foreach": not fused,
     }

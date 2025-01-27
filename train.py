@@ -10,7 +10,7 @@ import time
 from datetime import timedelta
 
 import torch
-from datasets import load_dataset
+from datasets import interleave_datasets, load_dataset
 from torch.distributed.elastic.multiprocessing.errors import record
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
@@ -87,20 +87,77 @@ def main(job_config: JobConfig):
     )
 
     logger.info("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(job_config.model.tokenizer_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        job_config.model.tokenizer_path,
+        trust_remote_code=True,
+        model_max_length=int(1e10)
+    )
     logger.info(f"{tokenizer}")
     logger.info(f"Loading dataset {job_config.training.dataset}"
                 f":{job_config.training.dataset_name}" if job_config.training.dataset_name is not None else "")
 
-    dataset = load_dataset(
-        path=job_config.training.dataset,
-        name=getattr(job_config.training, "dataset_name", None),
-        data_files=getattr(job_config.training, "data_files", None),
-        split=job_config.training.dataset_split,
-        trust_remote_code=True,
-        streaming=job_config.training.streaming,
-        num_proc=job_config.training.num_workers if not job_config.training.streaming else None
-    )
+    if len(job_config.training.dataset.split(',')) == 1:
+        dataset = load_dataset(
+            path=job_config.training.dataset,
+            name=getattr(job_config.training, 'dataset_name', None),
+            data_files=getattr(job_config.training, 'data_files', None),
+            split=job_config.training.dataset_split or "train",
+            trust_remote_code=True,
+            streaming=job_config.training.streaming,
+            num_proc=job_config.training.num_workers if not job_config.training.streaming else None
+        )
+    else:
+        datasets = job_config.training.dataset.split(',')
+        if job_config.training.dataset_name is not None:
+            dataset_names = job_config.training.dataset_name.split(',')
+            assert len(dataset_names) == len(datasets), "The number of dataset names must match the number of datasets"
+        else:
+            dataset_names = [None] * len(datasets)
+        if job_config.training.dataset_split is not None:
+            dataset_splits = [split or 'train' for split in job_config.training.dataset_split.split(',')]
+            assert len(dataset_splits) == len(datasets), "The number of dataset splits must match the number of datasets"
+        else:
+            dataset_splits = ['train'] * len(datasets)
+        if job_config.training.data_files is not None:
+            data_files = job_config.training.data_files.split(',')
+            assert len(data_files) == len(datasets), "The number of data files must match the number of datasets"
+        else:
+            data_files = [None] * len(datasets)
+        if job_config.training.data_probs is not None:
+            data_probs = [float(p) for p in job_config.training.data_probs.split(',')]
+            assert len(data_probs) == len(datasets), "The number of data probabilities must match the number of datasets"
+        else:
+            raise ValueError("Data sampling probabilities are required if using multiple datasets")
+        subsets = [
+            load_dataset(
+                path=datasets[i],
+                name=dataset_names[i],
+                data_files=data_files[i],
+                split=dataset_splits[i],
+                trust_remote_code=True,
+                streaming=job_config.training.streaming,
+                num_proc=job_config.training.num_workers if not job_config.training.streaming else None
+            )
+            for i in range(len(datasets))
+        ]
+        logger.info(f"Interleaving {len(subsets)} datasets with probabilities {data_probs}")
+        for i, (prob, subset) in enumerate(zip(data_probs, subsets)):
+            logger.info(
+                f"Subset {datasets[i]}" + (f":{dataset_names[i]} " if dataset_names[i] else " ") +
+                f"with probability {prob:.3f}\n{subset}"
+            )
+            if 'text' in subset.column_names:
+                subsets[i] = subset.select_columns('text')
+            elif 'content' in subset.column_names:
+                subsets[i] = subset.select_columns('content')
+            else:
+                raise ValueError(f"Subset {datasets[i]} has no 'text' or 'content' column")
+        dataset = interleave_datasets(
+            datasets=subsets,
+            probabilities=data_probs,
+            stopping_strategy='all_exhausted',
+            seed=job_config.training.seed
+        )
     if not job_config.training.streaming:
         dataset = dataset.to_iterable_dataset(num_shards=dp_degree*job_config.training.num_workers)
     else:

@@ -313,7 +313,6 @@ def shuffle(
     generator: np.random.Generator = None,
     buffer_size: int = 1024,
 ):
-    logger.info(f"Shuffling the dataset with seed {seed}...")
     generator = np.random.default_rng(seed) if generator is None else deepcopy(generator)
     return IterableDataset(
         ex_iterable=BufferShuffledExamplesIterable(
