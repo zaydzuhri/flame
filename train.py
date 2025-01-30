@@ -177,8 +177,9 @@ def main(job_config: JobConfig):
                 num_proc=job_config.training.num_workers if not job_config.training.streaming else None
             )
             logger.info(
-                f"Subset {datasets[i]}" + (f":{dataset_names[i]} " if dataset_names[i] else " ") +
-                f"with probability {prob:.3f}\n{subset}"
+                f"Subset {color.cyan}{datasets[i]}" + (f":{dataset_names[i]} " if dataset_names[i] else " ") +
+                f"(p = {prob:.3f}){color.reset}:\n" +
+                f"{subset}"
             )
 
             logger.info(f"Shuffling the dataset with seed {job_config.training.seed}")
@@ -226,6 +227,7 @@ def main(job_config: JobConfig):
             stopping_strategy='all_exhausted',
             seed=job_config.training.seed
         )
+        logger.info(f"{dataset}")
 
     logger.info("Building dataloader...")
     dataloader = build_dataloader(
