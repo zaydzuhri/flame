@@ -237,6 +237,11 @@ class JobConfig:
             help="Dataset split to use, with comma separated values if provided"
         )
         self.parser.add_argument(
+            "--training.data_dir",
+            default=None,
+            help="Data dirs to use, with comma separated values if provided"
+        )
+        self.parser.add_argument(
             "--training.data_files",
             default=None,
             help="Data files to use, with comma separated values if provided"

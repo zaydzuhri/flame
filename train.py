@@ -101,6 +101,7 @@ def main(job_config: JobConfig):
         dataset = load_dataset(
             path=job_config.training.dataset,
             name=getattr(job_config.training, 'dataset_name', None),
+            data_dir=getattr(job_config.training, 'data_dir', None),
             data_files=getattr(job_config.training, 'data_files', None),
             split=job_config.training.dataset_split or "train",
             trust_remote_code=True,
@@ -126,6 +127,7 @@ def main(job_config: JobConfig):
                 dataset = load_dataset(
                     path=job_config.training.dataset,
                     name=getattr(job_config.training, 'dataset_name', None),
+                    data_dir=getattr(job_config.training, 'data_dir', None),
                     data_files=getattr(job_config.training, 'data_files', None),
                     split=job_config.training.dataset_split or "train",
                     trust_remote_code=True,
@@ -146,6 +148,11 @@ def main(job_config: JobConfig):
             assert len(dataset_splits) == len(datasets), "The number of dataset splits must match the number of datasets"
         else:
             dataset_splits = ['train'] * len(datasets)
+        if job_config.training.data_dir is not None:
+            data_dirs = [data_dir or None for data_dir in job_config.training.data_dir.split(',')]
+            assert len(data_dirs) == len(datasets), "The number of data dirs must match the number of datasets"
+        else:
+            data_dirs = [None] * len(datasets)
         if job_config.training.data_files is not None:
             data_files = job_config.training.data_files.split(',')
             assert len(data_files) == len(datasets), "The number of data files must match the number of datasets"
@@ -162,6 +169,7 @@ def main(job_config: JobConfig):
             subset = load_dataset(
                 path=datasets[i],
                 name=dataset_names[i],
+                data_dir=data_dirs[i],
                 data_files=data_files[i],
                 split=dataset_splits[i],
                 trust_remote_code=True,
@@ -192,6 +200,7 @@ def main(job_config: JobConfig):
                     subset = load_dataset(
                         path=datasets[i],
                         name=dataset_names[i],
+                        data_dir=data_dirs[i],
                         data_files=data_files[i],
                         split=dataset_splits[i],
                         trust_remote_code=True,
