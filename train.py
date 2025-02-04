@@ -93,8 +93,10 @@ def main(job_config: JobConfig):
         model_max_length=int(1e10)
     )
     logger.info(f"{tokenizer}")
-    logger.info(f"Loading dataset {job_config.training.dataset}"
-                f":{job_config.training.dataset_name}" if job_config.training.dataset_name is not None else "")
+    logger.info(
+        f"Loading dataset {job_config.training.dataset}"
+        f":{job_config.training.dataset_name}" if job_config.training.dataset_name is not None else ""
+    )
 
     min_num_shards = dp_degree * job_config.training.num_workers
     if len(job_config.training.dataset.split(',')) == 1:
@@ -113,7 +115,9 @@ def main(job_config: JobConfig):
         logger.info(f"Shuffling the dataset with seed {job_config.training.seed}")
         if not job_config.training.streaming:
             # the states of map-style dataset is recoverable after shuffling
-            dataset = dataset.shuffle(seed=job_config.training.seed).to_iterable_dataset(num_shards=min_num_shards)
+            dataset = dataset.shuffle(
+                seed=job_config.training.seed
+            ).to_iterable_dataset(num_shards=min_num_shards)
         else:
             if dataset.num_shards < min_num_shards:
                 logger.warning(
@@ -124,16 +128,20 @@ def main(job_config: JobConfig):
                     f"Resharding dataset to {min_num_shards} shards and disabling streaming mode."
                     f"{color.reset}"
                 )
-                dataset = load_dataset(
-                    path=job_config.training.dataset,
-                    name=getattr(job_config.training, 'dataset_name', None),
-                    data_dir=getattr(job_config.training, 'data_dir', None),
-                    data_files=getattr(job_config.training, 'data_files', None),
-                    split=job_config.training.dataset_split or "train",
-                    trust_remote_code=True,
-                    streaming=False,
-                    num_proc=job_config.training.num_workers
-                ).shuffle(seed=job_config.training.seed).to_iterable_dataset(num_shards=min_num_shards)
+                dataset = (
+                    load_dataset(
+                        path=job_config.training.dataset,
+                        name=getattr(job_config.training, "dataset_name", None),
+                        data_dir=getattr(job_config.training, "data_dir", None),
+                        data_files=getattr(job_config.training, "data_files", None),
+                        split=job_config.training.dataset_split or "train",
+                        trust_remote_code=True,
+                        streaming=False,
+                        num_proc=job_config.training.num_workers,
+                    )
+                    .shuffle(seed=job_config.training.seed)
+                    .to_iterable_dataset(num_shards=min_num_shards)
+                )
             else:
                 dataset = shuffle(dataset, seed=job_config.training.seed)
     else:
@@ -198,19 +206,27 @@ def main(job_config: JobConfig):
                     )
                     # again, it's ok to directly shuffle the map-style dataset
                     # we expect an error raised if the map-style dataset still has not enough data shards
-                    subset = load_dataset(
-                        path=datasets[i],
-                        name=dataset_names[i],
-                        data_dir=data_dirs[i],
-                        data_files=data_files[i],
-                        split=dataset_splits[i],
-                        trust_remote_code=True,
-                        streaming=False,
-                        num_proc=job_config.training.num_workers
-                    ).shuffle(seed=job_config.training.seed).to_iterable_dataset(min_num_shards)
+                    subset = (
+                        load_dataset(
+                            path=datasets[i],
+                            name=dataset_names[i],
+                            data_dir=data_dirs[i],
+                            data_files=data_files[i],
+                            split=dataset_splits[i],
+                            trust_remote_code=True,
+                            streaming=False,
+                            num_proc=job_config.training.num_workers,
+                        )
+                        .shuffle(seed=job_config.training.seed)
+                        .to_iterable_dataset(min_num_shards)
+                    )
                 else:
                     # we set relatively small buffer size here as interleaving could provide some randomness
-                    subset = shuffle(subset, seed=job_config.training.seed, buffer_size=max(128, 1024 // len(datasets)))
+                    subset = shuffle(
+                        subset,
+                        seed=job_config.training.seed,
+                        buffer_size=max(128, 1024 // len(datasets)),
+                    )
 
             if 'text' in subset.column_names:
                 subset = subset.select_columns('text')
@@ -410,8 +426,29 @@ def main(job_config: JobConfig):
                 data_loading_times.append(time.perf_counter() - data_load_start)
 
                 input_ids = input_ids.to(device_type)
+
+                """
+                TODO[flame]: We need to carefully handle the position_ids for TP/CP
+                Depending on the Models'PE, the position_ids might be different.
+
+                e.g. for TP
+                    For RoPE, all ranks have the same position_ids. [FOR HF model]
+                    For sinusoidal, each rank has the coresponding chunked  position_ids. [FOR HF model]
+
+                e.g. for CP, [optional_context_parallel_ctx shoudl automatically distbute the position_ids]
+                    Each rank has the coresponding chunked position_ids. [FOR All model]
+
+                """
+                position_ids = torch.arange(
+                    0, input_ids.shape[1], device=device_type
+                ).repeat(input_ids.shape[0], 1)
+
                 labels = labels.to(device_type)
-                cu_seqlens = batch['cu_seqlens'].to(device_type) if 'cu_seqlens' in batch else None
+                cu_seqlens = (
+                    batch["cu_seqlens"].to(device_type)
+                    if "cu_seqlens" in batch
+                    else None
+                )
                 # apply context parallelism if cp is enabled
                 optional_context_parallel_ctx = (
                     utils.create_context_parallel_ctx(
@@ -424,6 +461,7 @@ def main(job_config: JobConfig):
                     if parallel_dims.cp_enabled
                     else None
                 )
+                # #! TODO[flame], we should distribute the position_ids as well with CP
 
                 if parallel_dims.pp_enabled:
                     # Pipeline Parallel forward / backward inside step() call
@@ -448,7 +486,12 @@ def main(job_config: JobConfig):
                 else:
                     # Non-PP forward / backward
                     with train_context(optional_context_parallel_ctx):
-                        output = model(input_ids=input_ids, labels=labels, cu_seqlens=cu_seqlens)
+                        output = model(
+                            input_ids=input_ids,
+                            labels=labels,
+                            position_ids=position_ids,
+                            cu_seqlens=cu_seqlens,
+                        )
                         loss = output.loss
                         loss.backward()
                 losses.append(loss)
@@ -480,7 +523,10 @@ def main(job_config: JobConfig):
             float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
 
             # log metrics
-            if train_state.step == 1 or train_state.step % job_config.metrics.log_freq == 0:
+            if (
+                train_state.step == 1
+                or train_state.step % job_config.metrics.log_freq == 0
+            ):
                 if (
                     parallel_dims.dp_replicate_enabled
                     or parallel_dims.dp_shard_enabled
@@ -496,10 +542,27 @@ def main(job_config: JobConfig):
 
                 time_delta = time.perf_counter() - time_last_log
 
+                """
+                TODO[flame]: check this after fixing TP/PP/CP, if we assume all ranks have the same number of tokens
+                we can just multiple it by DP's dims, this avoiding to deal with the case taht dp does nto exists
+                """
                 # update train state
-                train_state.token += utils.dist_reduce(
-                    torch.tensor(ntokens_since_last_log, device=device), "sum", world_mesh["dp_cp"]
+                # train_state.token += (
+                #     utils.dist_reduce(
+                #         torch.tensor(ntokens_since_last_log, device=device),
+                #         "sum",
+                #         world_mesh["dp_cp"],
+                #     )
+                #     / parallel_dims.non_data_parallel_size
+                # )
+
+                # update train state
+                train_state.token += (
+                    ntokens_since_last_log
+                    * parallel_dims.world_size
+                    / parallel_dims.non_data_parallel_size
                 )
+
                 train_state.elapsed += timedelta(seconds=time_delta)
                 train_state.log_steps.append(train_state.step)
                 train_state.global_avg_losses.append(global_avg_loss)
