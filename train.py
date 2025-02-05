@@ -31,7 +31,7 @@ from torchtitan.profiling import (maybe_enable_memory_snapshot,
                                   maybe_enable_profiling)
 
 
-# Enable debug tracing on failure: httgs://pytorch.org/docs/stable/elastic/errors.html
+# Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
 @record
 def main(job_config: JobConfig):
     init_logger()
@@ -308,6 +308,8 @@ def main(job_config: JobConfig):
             device,
             model_config
         )
+        # when PP is enabled, `model` obj is no longer used after this point, model_parts is used instead
+        del model
 
         # For PP with looped schedules, each item in model_parts is one stage-model-chunk.
         # We need to iterate through model_parts to apply SPMD parallelisms, compilation,
@@ -354,7 +356,10 @@ def main(job_config: JobConfig):
     if job_config.checkpoint.create_seed_checkpoint:
         assert (
             world_size == 1
-        ), "Must create seed-checkpoint using one gpu, to disable sharding"
+        ), "Must create seed checkpoint using a single device, to disable sharding"
+        assert (
+            job_config.checkpoint.enable_checkpoint
+        ), "Must enable checkpointing when creating a seed checkpoint"
         checkpoint.save(curr_step=0, force=True)
         logger.info("Created seed checkpoint")
         return
@@ -450,19 +455,20 @@ def main(job_config: JobConfig):
                     else None
                 )
                 # apply context parallelism if cp is enabled
+                # ensure CP handles the separate freqs_cis buffer for each pp stage
                 optional_context_parallel_ctx = (
                     utils.create_context_parallel_ctx(
                         cp_mesh=world_mesh["cp"],
-                        cp_buffers=[input_ids, labels, model.freqs_cis],
-                        cp_seq_dims=[1, 1, 0],
+                        cp_buffers=[input_ids, labels] + [m.freqs_cis for m in model_parts],
+                        cp_seq_dims=[1, 1] + [0 for _ in model_parts],
                         cp_no_restore_buffers={input_ids, labels},
                         cp_rotate_method=job_config.experimental.context_parallel_rotate_method,
                     )
                     if parallel_dims.cp_enabled
                     else None
                 )
-                # #! TODO[flame], we should distribute the position_ids as well with CP
 
+                # #! TODO[flame], we should distribute the position_ids as well with CP
                 if parallel_dims.pp_enabled:
                     # Pipeline Parallel forward / backward inside step() call
                     is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
@@ -504,9 +510,6 @@ def main(job_config: JobConfig):
                 foreach=True,
                 pp_mesh=pp_mesh if parallel_dims.pp_enabled else None,
             )
-
-            # sync float8 amaxes and scales
-            float8_handler.sync_float8_amax_and_scale_history(model_parts)
 
             # optimizer step
             checkpoint.maybe_wait_for_staging()

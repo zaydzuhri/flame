@@ -53,7 +53,7 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --training.seed 42 \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
-  --metrics.log_freq 4
+  --metrics.log_freq 1
 '
 
 echo "Launching training..."
