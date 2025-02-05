@@ -388,6 +388,17 @@ options:
 ```
 </details>
 
+### Training with `torch.compile`
+
+Starting from `torch 2.0`, `torch.compile` has been introduced as a new feature to seamlessly accelerate training processes.
+In `flame`, one can simply enable `torch.compile` by adding `--training.compile` flag to your training script.
+
+However, `fla` has integrated numerous fused kernels for acceleration, which may potentially conflict with `torch.compile`.
+We are actively working on resolving these issues to make compilation transparent to users.
+In the meantime, please ensure you are using the latest dependencies.
+
+Specifically, **we recommend using `torch>=2.6` and `triton>=3.0`**.
+
 ### Training with multiple datasets
 
 If you wish to train a model with all-round capabilities (e.g., code, math, and multilingual ability), it's necessary to train on multiple datasets. 
