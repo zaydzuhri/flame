@@ -122,11 +122,11 @@ def apply_tp(
 
     parallelize_module(model, tp_mesh, tp_plan.others_plan)
 
-    actual_transformer_blocks = monkey_patch_get_real_transformer_block(model)
-    if actual_transformer_blocks is None:
+    blocks = get_blocks(model)
+    if blocks is None:
         logger.warning("No TransformerBlock found for tensor parallelism")
     else:
-        for layer_id, transformer_block in enumerate(actual_transformer_blocks):
+        for layer_id, transformer_block in enumerate(blocks):
             layer_plan = dispatch_tp_plan(transformer_block).layer_plan
 
             parallelize_module(
@@ -224,14 +224,14 @@ def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
 def apply_ac(model: nn.Module, ac_config):
     """Apply activation checkpointing to the model."""
 
-    actual_transformer_blocks = monkey_patch_get_real_transformer_block(model)
-    if actual_transformer_blocks is None:
+    blocks = get_blocks(model)
+    if blocks is None:
         logger.warning("No TransformerBlock found for activation checkpointing")
         return
 
-    for layer_id, transformer_block in actual_transformer_blocks.named_children():
+    for layer_id, transformer_block in blocks.named_children():
         transformer_block = _apply_ac_to_transformer_block(transformer_block, ac_config)
-        actual_transformer_blocks.register_module(layer_id, transformer_block)
+        blocks.register_module(layer_id, transformer_block)
 
     logger.info(f"Applied {ac_config.mode} activation checkpointing to the model")
 
@@ -242,13 +242,13 @@ def apply_compile(model: nn.Module):
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
 
-    actual_transformer_blocks = monkey_patch_get_real_transformer_block(model)
-    if actual_transformer_blocks is None:
+    blocks = get_blocks(model)
+    if blocks is None:
         logger.warning("No TransformerBlock found for torch.compile")
     else:
-        for layer_id, block in actual_transformer_blocks.named_children():
-            block = torch.compile(block, fullgraph=True)
-            actual_transformer_blocks.register_module(layer_id, block)
+        for layer_id, block in blocks.named_children():
+            block = torch.compile(block)
+            blocks.register_module(layer_id, block)
         logger.info("Compiling each TransformerBlock with torch.compile")
 
 
@@ -268,13 +268,13 @@ def apply_fsdp(
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
 
-    actual_transformer_blocks = monkey_patch_get_real_transformer_block(model)
-    if actual_transformer_blocks is None:
+    blocks = get_blocks(model)
+    if blocks is None:
         logger.warning("No TransformerBlock found for FSDP")
 
     else:
-        total_blocks = len(actual_transformer_blocks)
-        for layer_id, block in enumerate(actual_transformer_blocks):
+        total_blocks = len(blocks)
+        for layer_id, block in enumerate(blocks):
             if pp_enabled:
                 # For PP, do not reshard after forward to avoid per-microbatch
                 # all-gathers, which can be expensive and non-overlapped
@@ -315,12 +315,13 @@ def apply_ddp(
 # below are monkey-patched functions for the FLA model
 
 
-def monkey_patch_get_real_transformer_block(model):
+def get_blocks(model):
     # TODO[flame]: adapt for network not using 'layers' attribute
     base_model_prefix = getattr(model, "base_model_prefix", "model")
     if not hasattr(model, base_model_prefix):
         return None
-    if not hasattr(getattr(model, base_model_prefix), "layers"):
+    model = getattr(model, base_model_prefix)
+    if not hasattr(model, "layers"):
         logger.warning('no "layers" in model for activation checkpointing')
         return None
-    return getattr(model, base_model_prefix).layers
+    return model.layers
