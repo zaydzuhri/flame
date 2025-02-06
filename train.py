@@ -265,8 +265,17 @@ def main(job_config: JobConfig):
     model_config = AutoConfig.from_pretrained(job_config.model.config)
     # set the model configs from training inputs:
     # 1. norm type to decide which norm layer to use
-    # 2. vocab size from tokenizer
-    # 3. context_len base on inputs
+    # 2. disable fused norm if TP is enabled
+    # 3. vocab size from tokenizer
+    # 4. context_len base on inputs
+    if parallel_dims.tp_enabled and model_config.fuse_norm:
+        logger.warning(
+            f"{color.red}"
+            f"Fused norm is not compatible with tensor parallelism. "
+            f"Disabling it for now."
+            f"{color.reset}"
+        )
+        model_config.fuse_norm = False
     model_config.vocab_size = tokenizer.vocab_size
 
     logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
