@@ -406,7 +406,7 @@ If you wish to train a model with all-round capabilities (e.g., code, math, and 
 For example, you can specify the following arguments to train on 6 datasets with different proportions:
 
 ```sh
-  --training.dataset HuggingFaceFW/fineweb-edu,opencsg/Fineweb-Edu-Chinese-V2.1,OpenCoder-LLM/opc-fineweb-code-corpus/discussions,math-ai/AutoMathText,EleutherAI/proof-pile-2,OpenCoder-LLM/opc-fineweb-math-corpus   \
+  --training.dataset HuggingFaceFW/fineweb-edu,opencsg/Fineweb-Edu-Chinese-V2.1,OpenCoder-LLM/opc-fineweb-code-corpus,math-ai/AutoMathText,EleutherAI/proof-pile-2,OpenCoder-LLM/opc-fineweb-math-corpus   \
   --training.data_probs 0.6,0.15,0.15,0.014,0.058,0.028     \
 ```
 
