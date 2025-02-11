@@ -297,7 +297,7 @@ def main(job_config: JobConfig):
     num_flop_per_token = utils.get_num_flop_per_token(
         utils.get_num_params(model, exclude_embedding=True),
         model_config,
-        job_config.training.seq_len,
+        job_config.training.context_len,
     )
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
