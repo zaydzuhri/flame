@@ -125,7 +125,7 @@ def main(job_config: JobConfig):
                     f"Dataset {job_config.training.dataset} has insufficient shards ({dataset.num_shards}). "
                     f"Need {min_num_shards} shards minimum for {dp_degree} data parallel workers × "
                     f"{job_config.training.num_workers} dataloader workers. "
-                    f"Resharding dataset to {min_num_shards} shards and disabling streaming mode."
+                    f"Disabling the streaming mode and resharding dataset to {min_num_shards} shards."
                     f"{color.reset}"
                 )
                 dataset = (
@@ -276,6 +276,8 @@ def main(job_config: JobConfig):
             f"{color.reset}"
         )
         model_config.fuse_norm = False
+        model_config.fuse_swiglu = False
+        model_config.fuse_cross_entropy = False
     model_config.vocab_size = tokenizer.vocab_size
 
     logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
@@ -436,6 +438,7 @@ def main(job_config: JobConfig):
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
                 input_ids, labels = batch['input_ids'], batch['labels']
+
                 ntokens_since_last_log += labels.numel()
                 data_loading_times.append(time.perf_counter() - data_load_start)
 

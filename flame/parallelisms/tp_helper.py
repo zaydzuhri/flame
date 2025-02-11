@@ -16,13 +16,13 @@ except ImportError:
     PrepareFloat8ModuleInput = None
 
 
-TP_PLAN_Collections = dict()
+TP_PLANS = dict()
 
 
 def dispatch_tp_plan(model, enable_float8=False, loss_parallel=False):
     model_name = model.__class__.__name__
-    if model_name in TP_PLAN_Collections:
-        plan_obj = TP_PLAN_Collections[model_name]
+    if model_name in TP_PLANS:
+        plan_obj = TP_PLANS[model_name]
     else:
         plan_obj = FlameTPPlan
 
@@ -34,7 +34,7 @@ def dispatch_tp_plan(model, enable_float8=False, loss_parallel=False):
 
 
 def register_tp_plan(name, tp_plan):
-    TP_PLAN_Collections[name] = tp_plan
+    TP_PLANS[name] = tp_plan
 
 
 class FlameTPPlan:
@@ -187,8 +187,8 @@ class FLATransformerPlan(FlameTPPlan):
 register_tp_plan("LlamaForCausalLM", LlamaPlan)
 register_tp_plan("LlamaDecoderLayer", LlamaPlan)
 
-# register_tp_plan("TransformerBlock", FLATransformerPlan)
-# register_tp_plan("TransformerForCausalLM", FLATransformerPlan)
+register_tp_plan("TransformerBlock", FLATransformerPlan)
+register_tp_plan("TransformerForCausalLM", FLATransformerPlan)
 
 # We need to `fix` stuffs on upstream FLA libs to use the above plan
 # e.g.

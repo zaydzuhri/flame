@@ -126,11 +126,11 @@ def apply_tp(
     if blocks is None:
         logger.warning("No TransformerBlock found for tensor parallelism")
     else:
-        for layer_id, transformer_block in enumerate(blocks):
-            layer_plan = dispatch_tp_plan(transformer_block).layer_plan
+        for _, block in enumerate(blocks):
+            layer_plan = dispatch_tp_plan(block).layer_plan
 
             parallelize_module(
-                module=transformer_block,
+                module=block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
@@ -161,7 +161,7 @@ _save_list = {
 }
 
 
-def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
+def _apply_ac_to_block(module: nn.Module, ac_config):
     valid_ac_modes = ("full", "selective")
     if ac_config.mode not in valid_ac_modes:
         raise ValueError(
@@ -229,9 +229,9 @@ def apply_ac(model: nn.Module, ac_config):
         logger.warning("No TransformerBlock found for activation checkpointing")
         return
 
-    for layer_id, transformer_block in blocks.named_children():
-        transformer_block = _apply_ac_to_transformer_block(transformer_block, ac_config)
-        blocks.register_module(layer_id, transformer_block)
+    for layer_id, block in blocks.named_children():
+        block = _apply_ac_to_block(block, ac_config)
+        blocks.register_module(layer_id, block)
 
     logger.info(f"Applied {ac_config.mode} activation checkpointing to the model")
 
