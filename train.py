@@ -15,6 +15,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
+from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
 from flame.config_manager import JobConfig
@@ -268,21 +269,30 @@ def main(job_config: JobConfig):
     # 2. disable fused norm if TP is enabled
     # 3. vocab size from tokenizer
     # 4. context_len base on inputs
-    if parallel_dims.tp_enabled and model_config.fuse_norm:
-        logger.warning(
-            f"{color.red}"
-            f"Fused norm is not compatible with tensor parallelism. "
-            f"Disabling it for now."
-            f"{color.reset}"
-        )
-        model_config.fuse_norm = False
-        model_config.fuse_swiglu = False
-        model_config.fuse_cross_entropy = False
+    if parallel_dims.tp_enabled:
+        if model_config.fuse_norm:
+            logger.warning(
+                f"{color.red}"
+                f"Fused norm is not compatible with tensor parallelism. "
+                f"Disabling it for now."
+                f"{color.reset}"
+            )
+            model_config.fuse_norm = False
+        if model_config.fuse_swiglu:
+            logger.warning(
+                f"{color.red}"
+                f"Fused SwiGLU is not compatible with tensor parallelism. "
+                f"Disabling it for now."
+                f"{color.reset}"
+            )
+            model_config.fuse_swiglu = False
     model_config.vocab_size = tokenizer.vocab_size
 
     logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
     with torch.device('meta'):
         model = AutoModelForCausalLM.from_config(model_config)
+        if model_config.fuse_cross_entropy:
+            model.criterion = FusedLinearCrossEntropyLoss()
         # defer weight initialization until after parallelisms are applied
         model.apply(lambda m: setattr(m, '_is_hf_initialized', False))
     logger.info(f"{color.blue}\n{model}{color.reset}\n")

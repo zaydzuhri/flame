@@ -26,7 +26,7 @@ TORCH_DTYPE_MAP = {
 
 
 def string_list(raw_arg):
-    return raw_arg.split(",")
+    return [s.strip() for s in raw_arg.split(",") if s.strip()]
 
 
 class JobConfig:
@@ -93,12 +93,6 @@ class JobConfig:
             type=str,
             default="fla-hub/gla-1.3B-100B",
             help="Path to the model config",
-        )
-        self.parser.add_argument(
-            "--model.norm_type",
-            type=str,
-            default="rmsnorm",
-            help="Type of layer normalization to use [layernorm, np_layernorm, rmsnorm, fused_rmsnorm]",
         )
         self.parser.add_argument(
             "--model.tokenizer_path",
@@ -318,6 +312,23 @@ class JobConfig:
             help="Whether to apply loss parallel when sequence parallel is enabled",
         )
         self.parser.add_argument(
+            "--training.fsdp_reshard_after_forward",
+            type=str,
+            default="default",
+            choices=["default", "always", "never"],
+            help="""
+            `reshard_after_forward` specifies the policy for applying `reshard_after_forward`
+            within an FSDP setup. `reshard_after_forward` controls parameter behavior after forward,
+            trading off memory and communication. See torch's `fully_shard` API for more documentation
+            on `reshard_after_forward`.
+            The supported policies include "default", "always" and "never":
+            - "default" applies default resharding behavior, implementing "smart defaults" for known optimal
+              scenarios.
+            - "always" will enable `reshard_after_forward` for all forward passes.
+            - "never" will disable `reshard_after_forward` for all forward passes.
+            """,
+        )
+        self.parser.add_argument(
             "--training.mixed_precision_param",
             type=str,
             default="bfloat16",
@@ -490,6 +501,23 @@ class JobConfig:
                 The default value is 'allgather'.
             """,
         )
+        # I'm not particularly fond of this. Users can choose to write their own wrapper
+        # module and import TorchTitan training loop and execute it, which look cleaner.
+        # One reason to provide this option is to allow users to use the existing run script.
+        # While the script is pretty trivial now, we may add more logic when integrating
+        # with TorchFT.
+        # This option is subject to change and may be deleted in the future.
+        self.parser.add_argument(
+            "--experimental.custom_model_path",
+            type=str,
+            default="",
+            help="""
+                The --custom_model_path option allows to specify a custom path to a model module
+                that is not natively implemented within TorchTitan.
+                Acceptable values are the file system path to the module (e.g., my_models/model_x)
+                dotted import module  (e.g., some_package.model_x).
+            """,
+        )
         # checkpointing configs
         self.parser.add_argument(
             "--checkpoint.enable_checkpoint",
@@ -584,7 +612,17 @@ class JobConfig:
             default=-1,
             help="Load the checkpoint at the specified step. If -1, load the latest checkpoint.",
         )
-
+        self.parser.add_argument(
+            "--checkpoint.exclude_from_loading",
+            type=string_list,
+            nargs="*",
+            default=[],
+            help="""
+                Exclude specific keys from being loaded from the checkpoint.
+                Provide a comma-separated list of keys to exclude, e.g. 'optimizer,lr_scheduler,dataloader'.
+                This will load the model only, excluding the specified keys.
+            """,
+        )
         # activation checkpointing configs
         self.parser.add_argument(
             "--activation_checkpoint.mode",
@@ -692,6 +730,13 @@ class JobConfig:
             exp["pipeline_parallel_split_points"] = string_list(
                 exp["pipeline_parallel_split_points"]
             )
+        if (
+            "checkpoint" in args_dict
+            and "exclude_from_loading" in args_dict["checkpoint"]
+            and isinstance(args_dict["checkpoint"]["exclude_from_loading"], str)
+        ):
+            ckpt = args_dict["checkpoint"]
+            ckpt["exclude_from_loading"] = string_list(ckpt["exclude_from_loading"])
 
         # override args dict with cmd_args
         cmd_args_dict = self._args_to_two_level_dict(cmd_args)
@@ -737,6 +782,9 @@ class JobConfig:
                 # without this special case, type inference breaks here,
                 # since the inferred type is just 'list' and it ends up flattening
                 # e.g. from ["layers.0", "layers.1"] into ["l", "a", "y", "e", "r", "s", ".0", ...]
+                aux_parser.add_argument("--" + arg, type=string_list)
+            elif arg == "checkpoint.exclude_from_loading":
+                # similar to the case above
                 aux_parser.add_argument("--" + arg, type=string_list)
             else:
                 aux_parser.add_argument("--" + arg, type=type(val))

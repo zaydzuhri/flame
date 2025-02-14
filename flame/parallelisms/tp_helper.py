@@ -15,7 +15,6 @@ except ImportError:
     Float8RowwiseParallel = None
     PrepareFloat8ModuleInput = None
 
-
 TP_PLANS = dict()
 
 
@@ -189,11 +188,3 @@ register_tp_plan("LlamaDecoderLayer", LlamaPlan)
 
 register_tp_plan("TransformerBlock", FLATransformerPlan)
 register_tp_plan("TransformerForCausalLM", FLATransformerPlan)
-
-# We need to `fix` stuffs on upstream FLA libs to use the above plan
-# e.g.
-# Use Naive RMSNorm
-# Use Naive SwiGLU
-# Disable Cross-entity fusion
-# Reshape QKV via head-dim instead of num-heads
-# remove attn's compile decorator
