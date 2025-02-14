@@ -286,6 +286,14 @@ def main(job_config: JobConfig):
                 f"{color.reset}"
             )
             model_config.fuse_swiglu = False
+        if model_config.fuse_cross_entropy:
+            logger.warning(
+                f"{color.red}"
+                f"Fused cross entropy is not compatible with tensor parallelism. "
+                f"Disabling it for now."
+                f"{color.reset}"
+            )
+            model_config.fuse_cross_entropy = False
     model_config.vocab_size = tokenizer.vocab_size
 
     logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
@@ -345,6 +353,7 @@ def main(job_config: JobConfig):
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         parallelize_fla(model, world_mesh, parallel_dims, job_config)
+
         model.to_empty(device=init_device)
         with torch.no_grad():
             model.post_init()
