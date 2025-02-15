@@ -25,8 +25,8 @@ from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
 from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
-from torchtitan.float8 import Float8Handler
 from torchtitan.logging import init_logger, logger
+from torchtitan.model_converter import build_model_converters
 from torchtitan.parallelisms import ParallelDims
 from torchtitan.profiling import (maybe_enable_memory_snapshot,
                                   maybe_enable_profiling)
@@ -286,11 +286,11 @@ def main(job_config: JobConfig):
                 f"{color.reset}"
             )
             model_config.fuse_swiglu = False
+    if parallel_dims.loss_parallel_enabled:
         if model_config.fuse_cross_entropy:
             logger.warning(
                 f"{color.red}"
-                f"Fused cross entropy is not compatible with tensor parallelism. "
-                f"Disabling it for now."
+                f"Loss parallel enabled. Disabling fused cross entropy for now."
                 f"{color.reset}"
             )
             model_config.fuse_cross_entropy = False
@@ -300,15 +300,14 @@ def main(job_config: JobConfig):
     with torch.device('meta'):
         model = AutoModelForCausalLM.from_config(model_config)
         if model_config.fuse_cross_entropy:
-            model.criterion = FusedLinearCrossEntropyLoss()
+            model.criterion = FusedLinearCrossEntropyLoss(num_chunks=8//parallel_dims.tp)
         # defer weight initialization until after parallelisms are applied
         model.apply(lambda m: setattr(m, '_is_hf_initialized', False))
     logger.info(f"{color.blue}\n{model}{color.reset}\n")
 
-    # a no-op hander if float8 is not enabled
-    float8_handler = Float8Handler(job_config, parallel_dims)
-    # swap to Float8Linear based on float8 configs
-    float8_handler.convert_to_float8_training(model)
+    # Build the collection of model converters. No-op if `model.converters` empty
+    model_converters = build_model_converters(job_config, parallel_dims)
+    model_converters.convert(model)
 
     # log model size
     model_param_count = model.num_parameters()
@@ -552,9 +551,10 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
-            # calculate float8 dynamic amax/scale for all-parameter for FSDP2
+            # Post-optimizer model converters hook.
+            # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
             # it issues a single all-reduce for all parameters at once for better performance
-            float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
+            model_converters.post_optimizer_hook(model_parts)
 
             # log metrics
             if (

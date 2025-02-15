@@ -45,11 +45,12 @@ def parallelize_fla(
             and not job_config.training.compile
         ):
             raise RuntimeError("Async TP requires --training.compile")
+        enable_float8_linear = "float8" in job_config.model.converters
         apply_tp(
             model,
             world_mesh["tp"],
             loss_parallel=parallel_dims.loss_parallel_enabled,
-            enable_float8=job_config.float8.enable_float8_linear,
+            enable_float8=enable_float8_linear,
             enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
         )
 
@@ -113,8 +114,7 @@ def apply_tp(
     # 3. Parallelize the final linear output layer
     from flame.parallelisms.tp_helper import dispatch_tp_plan
 
-    tp_plan = dispatch_tp_plan(model, loss_parallel, enable_float8)
-
+    tp_plan = dispatch_tp_plan(model, loss_parallel=loss_parallel, enable_float8=enable_float8)
     parallelize_module(model, tp_mesh, tp_plan.others_plan)
 
     blocks = get_blocks(model)
