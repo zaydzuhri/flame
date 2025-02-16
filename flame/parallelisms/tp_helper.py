@@ -15,6 +15,7 @@ except ImportError:
     Float8RowwiseParallel = None
     PrepareFloat8ModuleInput = None
 from fla.modules.fused_linear_cross_entropy import LinearLossParallel
+from fla.modules.mlp import SwiGLULinearParallel
 from fla.modules.parallel import PrepareModuleWeight
 
 TP_PLANS = dict()
@@ -189,6 +190,9 @@ class FLATransformerPlan(FlameTPPlan):
             "mlp.gate_proj": self.colwise_parallel(),
             "mlp.up_proj": self.colwise_parallel(),
             "mlp.down_proj": self.rowwise_parallel(output_layouts=Shard(1)),
+            "mlp.swiglu_linear": SwiGLULinearParallel(
+                output_layouts=Shard(1)
+            )
         }
 
         return plans

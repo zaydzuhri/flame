@@ -278,14 +278,6 @@ def main(job_config: JobConfig):
                 f"{color.reset}"
             )
             model_config.fuse_norm = False
-        if model_config.fuse_swiglu:
-            logger.warning(
-                f"{color.red}"
-                f"Fused SwiGLU is not compatible with tensor parallelism. "
-                f"Disabling it for now."
-                f"{color.reset}"
-            )
-            model_config.fuse_swiglu = False
     if parallel_dims.loss_parallel_enabled:
         if model_config.fuse_cross_entropy:
             logger.warning(
