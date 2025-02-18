@@ -232,18 +232,29 @@ def apply_ac(model: nn.Module, ac_config):
 
 def apply_compile(model: nn.Module):
     """
-    Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
+    Apply torch.compile to each block, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
 
     blocks = get_blocks(model)
     if blocks is None:
-        logger.warning("No TransformerBlock found for torch.compile")
+        logger.warning("No block found for torch.compile")
     else:
         for layer_id, block in blocks.named_children():
             block = torch.compile(block)
             blocks.register_module(layer_id, block)
-        logger.info("Compiling each TransformerBlock with torch.compile")
+        logger.info("Compiling each block with torch.compile")
+
+    base_model_prefix = getattr(model, "base_model_prefix", "model")
+    logger.info("Compiling the embedding, norm, and lm_head layers with torch.compile")
+    embeddings = torch.compile(getattr(model, base_model_prefix).embeddings, fullgraph=True)
+    getattr(model, base_model_prefix).register_module("embeddings", embeddings)
+    norm = torch.compile(getattr(model, base_model_prefix).norm, fullgraph=True)
+    getattr(model, base_model_prefix).register_module("norm", norm)
+    model.register_module("lm_head", torch.compile(model.lm_head, fullgraph=True))
+
+    logger.info("Compiling the entire model with torch.compile")
+    model = torch.compile(model)
 
 
 def apply_fsdp(
