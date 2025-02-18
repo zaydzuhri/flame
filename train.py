@@ -286,7 +286,7 @@ def main(job_config: JobConfig):
                 f"{color.reset}"
             )
             model_config.fuse_cross_entropy = False
-    model_config.vocab_size = tokenizer.vocab_size
+    model_config.vocab_size = max(tokenizer.vocab_size, model_config.vocab_size)
 
     logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
     with torch.device('meta'):
