@@ -410,6 +410,29 @@ For example, you can specify the following arguments to train on 6 datasets with
   --training.data_probs 0.6,0.15,0.15,0.014,0.058,0.028     \
 ```
 
+### Finalizing training
+
+Once training is complete, you may want to convert the distributed checkpoints (DCPs) into the 🤗 format for broader use. 
+To facilitate this, we provide a straightforward conversion script:
+
+```sh
+python convert_dcp_to_hf.py --checkpoint <path_to_dcp> --path <path_to_hf> --config <path_to_config> --tokenizer <path_to_tokenizer>
+```
+After this, your model will be in the 🤗 format, ready to be shared or deployed. 
+You can then easily publish your model using the `huggingface_hub` for wider accessibility.
+
+### Continual training
+
+If you wish to build upon a strong pre-trained model (in 🤗 format) and continue training, we also offer a script to convert the 🤗 format model back into DCP format. 
+This allows you to seamlessly resume training with `flame`.
+```sh
+python convert_hf_to_dcp.py --model <path_to_hf> --checkpoint <path_to_dcp/checkpoint/step-0>
+```
+Here, `<path_to_dcp>` is the directory where your distributed checkpoints will be stored. 
+The checkpoint is intentionally saved at `<step-0>` within the checkpoint folder to ensure it is loadable by `flame` during the initial training step, similar to how a seed checkpoint is handled.
+
+Once the conversion is complete, you can proceed with training using `flame` as usual, continuing from where the pretrained model left off.
+
 ## Multi-node training
 
 If you have access to multi-node GPUs, consider leveraging them for optimal performance. 
