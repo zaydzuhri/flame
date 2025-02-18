@@ -3,12 +3,15 @@
 import argparse
 import os
 import tempfile
+import io # Import the io module
 
 import torch
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+import torch.serialization
 
 import fla  # noqa
+from datetime import timedelta
 
 
 def save_pretrained(
@@ -36,7 +39,11 @@ def save_pretrained(
         model = AutoModelForCausalLM.from_config(config)
         print(model)
         print("Loading state dict from the checkpoint")
-        model.load_state_dict(torch.load(checkpoint_path, map_location='cpu')['model'])
+
+        # Add datetime.timedelta and io.BytesIO to safe globals
+        torch.serialization.add_safe_globals([timedelta, io.BytesIO]) # Added io.BytesIO
+        model.load_state_dict(torch.load(checkpoint_path, map_location='cpu')['model']) # torch.load now with default weights_only=True will work
+
         print(f"Saving the model to {path}")
         model.save_pretrained(path)
 
