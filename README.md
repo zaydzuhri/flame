@@ -4,7 +4,10 @@
 
 </div>
  
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency. 
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency.
+
+`Flame` is a **general-purpose trainer**, not limited to linear attention but applicable to arbitrary models. Now, It is essentially `torchTitan` with a `HuggingFace` interface, enabling both fast training and convenient evaluation. 
+
 
 **Feature Highlights:**
 
