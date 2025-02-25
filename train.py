@@ -585,10 +585,10 @@ def main(job_config: JobConfig):
                             position_ids=position_ids,
                             cu_seqlens=cu_seqlens,
                         )
-                        loss = output.loss
+                        loss = output.loss / job_config.training.gradient_accumulation_steps
                         loss.backward()
                 losses.append(loss)
-            loss = sum(losses) / len(losses)
+            loss = sum(losses)
 
             # clip gradients
             grad_norm = utils.clip_grad_norm_(
