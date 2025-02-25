@@ -16,26 +16,52 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
-from flame import utils
-from flame.checkpoint import CheckpointManager, TrainState
+from flame.components.checkpoint import CheckpointManager, TrainState
+from flame.components.optimizer import build_lr_schedulers, build_optimizers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
-from flame.metrics import build_device_memory_monitor, build_metric_logger
-from flame.optimizer import build_lr_schedulers, build_optimizers
-from flame.parallelisms.parallelize_fla import parallelize_fla
-from flame.parallelisms.pipeline_fla import pipeline_fla
-from flame.utils import device_module, device_type
-from torchtitan.float8 import Float8Converter
-from torchtitan.logging import init_logger, logger
-from torchtitan.parallelisms import ParallelDims
-from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+from flame.models.parallelize_fla import parallelize_fla
+from flame.models.pipeline_fla import pipeline_fla
+from flame.tools.utils import get_num_flop_per_token, get_num_params
+from torchtitan.components.loss import cross_entropy_loss
+from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import utils as dist_utils
+from torchtitan.protocols.model_converter import build_model_converters
+from torchtitan.protocols.train_spec import (TrainSpec, get_train_spec,
+                                             register_train_spec)
+from torchtitan.tools import utils
+from torchtitan.tools.logging import init_logger, logger
+from torchtitan.tools.metrics import (build_device_memory_monitor,
+                                      build_metric_logger)
+from torchtitan.tools.profiling import (maybe_enable_memory_snapshot,
+                                        maybe_enable_profiling)
+
+register_train_spec(
+    TrainSpec(
+        name="fla",
+        cls=AutoModelForCausalLM,
+        config=AutoConfig,
+        parallelize_fn=parallelize_fla,
+        pipelining_fn=pipeline_fla,
+        build_optimizers_fn=build_optimizers,
+        build_lr_schedulers_fn=build_lr_schedulers,
+        build_dataloader_fn=build_dataloader,
+        tokenizer_cls=AutoTokenizer,
+        loss_fn=cross_entropy_loss,
+    )
+)
 
 
 # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
 @record
 def main(job_config: JobConfig):
-    init_logger()
     logger.info(f"Starting job: {job_config.job.description}")
+
+    if job_config.experimental.custom_model_path:
+        utils.import_module_from_path(job_config.experimental.custom_model_path)
+
+    if job_config.job.print_args:
+        logger.info(f"Running with args: {job_config.to_dict()}")
 
     # used for colorful printing
     color = utils.NoColor if job_config.metrics.disable_color_printing else utils.Color
@@ -44,7 +70,6 @@ def main(job_config: JobConfig):
         logger.info(
             f"{color.green}{json.dumps(job_config.to_dict(), indent=2, sort_keys=True)}{color.reset}"
         )
-
     # take control of garbage collection to avoid stragglers
     gc_handler = utils.GarbageCollection(gc_freq=job_config.training.gc_freq)
 
@@ -59,11 +84,10 @@ def main(job_config: JobConfig):
         world_size=world_size,
         enable_loss_parallel=not job_config.training.disable_loss_parallel,
     )
+    device_module, device_type = utils.device_module, utils.device_type
     device = torch.device(f"{device_type}:{int(os.environ['LOCAL_RANK'])}")
     device_module.set_device(device)
-
-    utils.init_distributed(job_config)
-
+    dist_utils.init_distributed(job_config)
     # initialize device memory monitor and get peak flops for MFU calculation
     device_memory_monitor = build_device_memory_monitor()
     gpu_peak_flops = utils.get_peak_flops(device_memory_monitor.device_name)
@@ -81,9 +105,10 @@ def main(job_config: JobConfig):
         pp_mesh = world_mesh["pp"]
 
     # Set random seed, and maybe enable deterministic mode (mainly for debugging, expect perf loss)
-    utils.set_determinism(
+    dist_utils.set_determinism(
         world_mesh, device, job_config.training.seed, job_config.training.deterministic
     )
+    train_spec = get_train_spec(job_config.model.name)
 
     logger.info("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
@@ -335,25 +360,14 @@ def main(job_config: JobConfig):
         model.apply(lambda m: setattr(m, "_is_hf_initialized", False))
     logger.info(f"{color.blue}\n{model}{color.reset}\n")
 
-    """
-    # !TODO[flame]: torchtitan@57387af0e0e6173e7c0f3a38ac5db1134bb376d5 introduces a bug that cannot handel the case:
-    FP8 is not enabled & torchao is not installed
-    So we monkey patch the code to avoid this issue temporarily
-    """
-    float8_config = job_config.float8
-    if not float8_config.enable_float8_linear:
-        fp8_enabled = False
-    else:
-        # a no-op hander if float8 is not enabled
-        float8_handler = Float8Converter(job_config, parallel_dims)
-        # swap to Float8Linear based on float8 configs
-        float8_handler.convert_to_float8_training(model)
-        fp8_enabled = float8_handler.enabled
+    # Build the collection of model converters. No-op if `model.converters` empty
+    model_converters = build_model_converters(job_config, parallel_dims)
+    model_converters.convert(model)
 
     # log model size
     model_param_count = model.num_parameters()
-    num_flop_per_token = utils.get_num_flop_per_token(
-        utils.get_num_params(model, exclude_embedding=True),
+    num_flop_per_token = get_num_flop_per_token(
+        get_num_params(model, exclude_embedding=True),
         model_config,
         job_config.training.context_len,
     )
@@ -369,8 +383,19 @@ def main(job_config: JobConfig):
     # apply parallelisms and initialization
     if parallel_dims.pp_enabled:
         # apply PT-D Pipeline Parallel
-        pp_schedule, model_parts = pipeline_fla(
-            model, pp_mesh, parallel_dims, job_config, device, model_config
+        (
+            pp_schedule,
+            model_parts,
+            has_first_stage,
+            has_last_stage,
+        ) = train_spec.pipelining_fn(
+            model,
+            pp_mesh,
+            parallel_dims,
+            job_config,
+            device,
+            model_config,
+            train_spec.loss_fn,
         )
         # when PP is enabled, `model` obj is no longer used after this point, model_parts is used instead
         del model
@@ -380,19 +405,19 @@ def main(job_config: JobConfig):
         # optimizer, and checkpointing
         for m in model_parts:
             # apply SPMD-style PT-D techniques
-            parallelize_fla(m, world_mesh, parallel_dims, job_config)
+            train_spec.parallelize_fn(m, world_mesh, parallel_dims, job_config)
             m.to_empty(device=init_device)
             with torch.no_grad():
                 m.post_init()
             m.train()
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
-        parallelize_fla(model, world_mesh, parallel_dims, job_config)
-
+        train_spec.parallelize_fn(model, world_mesh, parallel_dims, job_config)
         model.to_empty(device=init_device)
         with torch.no_grad():
             model.post_init()
         model.train()
+
         model_parts = [model]
 
     device_mem_stats = device_memory_monitor.get_peak_stats()
@@ -403,8 +428,14 @@ def main(job_config: JobConfig):
     )
 
     # build optimizer after applying parallelisms to the model
-    optimizers = build_optimizers(model_parts, job_config)
-    lr_schedulers = build_lr_schedulers(optimizers.optimizers, job_config)
+    optimizers = train_spec.build_optimizers_fn(model_parts, job_config)
+    lr_schedulers = train_spec.build_lr_schedulers_fn(optimizers, job_config)
+    # Post optimizer step model converters hook.
+    # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
+    # where it issues a single all-reduce for all parameters at once for better performance
+    optimizers.register_step_post_hook(
+        lambda *args, **kwargs: model_converters.post_optimizer_hook(model_parts)
+    )
 
     train_state = TrainState()
 
@@ -445,7 +476,7 @@ def main(job_config: JobConfig):
 
     data_iterator = iter(dataloader)
 
-    train_context = utils.get_train_context(
+    train_context = dist_utils.get_train_context(
         parallel_dims.loss_parallel_enabled,
         job_config.experimental.enable_compiled_autograd,
     )
@@ -492,14 +523,11 @@ def main(job_config: JobConfig):
         f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}"
     )
 
-    with (
-        maybe_enable_profiling(
-            job_config, global_step=train_state.step
-        ) as torch_profiler,
-        maybe_enable_memory_snapshot(
-            job_config, global_step=train_state.step
-        ) as memory_profiler,
-    ):
+    with maybe_enable_profiling(
+        job_config, global_step=train_state.step
+    ) as torch_profiler, maybe_enable_memory_snapshot(
+        job_config, global_step=train_state.step
+    ) as memory_profiler:
         while train_state.step < job_config.training.steps:
             train_state.step += 1
             gc_handler.run(train_state.step)
@@ -544,7 +572,7 @@ def main(job_config: JobConfig):
                 # apply context parallelism if cp is enabled
                 # ensure CP handles the separate freqs_cis buffer for each pp stage
                 optional_context_parallel_ctx = (
-                    utils.create_context_parallel_ctx(
+                    dist_utils.create_context_parallel_ctx(
                         cp_mesh=world_mesh["cp"],
                         cp_buffers=[input_ids, labels, position_ids],
                         cp_seq_dims=[1, 1, 1],
@@ -591,7 +619,7 @@ def main(job_config: JobConfig):
             loss = sum(losses)
 
             # clip gradients
-            grad_norm = utils.clip_grad_norm_(
+            grad_norm = dist_utils.clip_grad_norm_(
                 [p for m in model_parts for p in m.parameters()],
                 job_config.training.max_norm,
                 foreach=True,
@@ -612,13 +640,6 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
-            # Post-optimizer model converters hook.
-            # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
-            # it issues a single all-reduce for all parameters at once for better performance
-            # !TODO[flame]: torchtitan@57387af0e0e6173e7c0f3a38ac5db1134bb376d5 introduces a bug that cannot handel the case:
-            if fp8_enabled:
-                float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
-
             # log metrics
             if (
                 train_state.step == 1
@@ -631,8 +652,8 @@ def main(job_config: JobConfig):
                 ):
                     loss = loss.detach()
                     global_avg_loss, global_max_loss = (
-                        utils.dist_mean(loss, world_mesh["dp_cp"]),
-                        utils.dist_max(loss, world_mesh["dp_cp"]),
+                        dist_utils.dist_mean(loss, world_mesh["dp_cp"]),
+                        dist_utils.dist_max(loss, world_mesh["dp_cp"]),
                     )
                 else:
                     global_avg_loss = global_max_loss = loss.item()
@@ -652,7 +673,6 @@ def main(job_config: JobConfig):
                 #     )
                 #     / parallel_dims.non_data_parallel_size
                 # )
-
                 # update train state
                 train_state.token += (
                     ntokens_since_last_log
@@ -734,7 +754,7 @@ def main(job_config: JobConfig):
             # reduce timeout after first train step for faster signal
             # (assuming lazy init and compilation are finished)
             if train_state.step == 1:
-                utils.set_pg_timeouts(
+                dist_utils.set_pg_timeouts(
                     timeout=timedelta(seconds=job_config.comm.train_timeout_seconds),
                     world_mesh=world_mesh,
                 )
@@ -748,6 +768,7 @@ def main(job_config: JobConfig):
 
 
 if __name__ == "__main__":
+    init_logger()
     config = JobConfig()
     config.parse_args()
     main(config)

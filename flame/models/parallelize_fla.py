@@ -16,13 +16,22 @@ from torch.distributed._composable.fsdp import (CPUOffloadPolicy,
                                                 MixedPrecisionPolicy,
                                                 fully_shard)
 from torch.distributed._composable.replicate import replicate
+from torch.distributed._tensor import Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
     checkpoint_wrapper as ptd_checkpoint_wrapper
-from torch.distributed.tensor.parallel import parallelize_module
+from torch.distributed.tensor.parallel import (ColwiseParallel,
+                                               PrepareModuleInput,
+                                               PrepareModuleOutput,
+                                               RowwiseParallel,
+                                               SequenceParallel,
+                                               parallelize_module)
 
+from fla.modules.fused_linear_cross_entropy import LinearLossParallel
+from fla.modules.mlp import SwiGLULinearParallel
+from fla.modules.parallel import PrepareModuleWeight
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
-from torchtitan.logging import logger
-from torchtitan.parallelisms import ParallelDims
+from torchtitan.distributed.parallel_dims import ParallelDims
+from torchtitan.tools.logging import logger
 
 
 def parallelize_fla(
@@ -57,7 +66,7 @@ def parallelize_fla(
     if job_config.activation_checkpoint.mode != "none":
         apply_ac(model, job_config.activation_checkpoint)
 
-    # turn on per-TransformerBlock compile after AC wrapping and before FSDP
+    # turn on per-block compile after AC wrapping and before FSDP
     if job_config.training.compile:
         apply_compile(model)
 
@@ -100,6 +109,135 @@ def parallelize_fla(
         )
 
 
+class TPPlan:
+    def __init__(
+        self,
+        model=None,
+        loss_parallel=False,
+        enable_float8=False,
+    ):
+        self.model = model
+        self.loss_parallel = loss_parallel
+        self.enable_float8 = enable_float8
+        self.base_model_prefix = getattr(model, "base_model_prefix", "model")
+
+        # TODO(vkuzo): once float8 configuration supports delayed scaling,
+        # add a check here to enforce supported float8 all-gather configurations
+        # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
+        try:
+            from torchao.float8.float8_tensor_parallel import (
+                Float8ColwiseParallel, Float8RowwiseParallel,
+                PrepareFloat8ModuleInput)
+        except ImportError:
+            Float8ColwiseParallel = None
+            Float8RowwiseParallel = None
+            PrepareFloat8ModuleInput = None
+        if self.enable_float8 and Float8ColwiseParallel is not None:
+            self.rowwise_parallel = Float8RowwiseParallel
+            self.colwise_parallel = Float8ColwiseParallel
+            self.prepare_module_input = PrepareFloat8ModuleInput
+            self.prepare_module_output = PrepareModuleOutput
+        else:
+            self.rowwise_parallel = RowwiseParallel
+            self.colwise_parallel = ColwiseParallel
+            self.prepare_module_input = PrepareModuleInput
+            self.prepare_module_output = PrepareModuleOutput
+
+    @property
+    def model_plan(self):
+        plans = {
+            f"{self.base_model_prefix}.embeddings": RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+            ),
+            f"{self.base_model_prefix}.norm": SequenceParallel(),
+        }
+        if self.loss_parallel:
+            plans.update({
+                "lm_head": ColwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Shard(-1) if self.loss_parallel else Replicate(),
+                    use_local_output=not self.loss_parallel,
+                ),
+            })
+        else:
+            plans.update({
+                "lm_head": PrepareModuleWeight(layouts=Replicate()),
+                "criterion": LinearLossParallel()
+            })
+        return plans
+
+    @property
+    def layer_plan(self):
+        return {
+            "attn_norm": SequenceParallel(),
+            **self.attn_plan,
+            "mlp_norm": SequenceParallel(),
+            **self.mlp_plan
+        }
+
+    @property
+    def attn_plan(self):
+        raise NotImplementedError(f"TP plans for token mixing layers of {self.model.config.model_type} not implemented")
+
+    @property
+    def mlp_plan(self):
+        return {
+            "mlp": self.prepare_module_input(
+                input_layouts=(Shard(1),),
+                desired_input_layouts=(Replicate(),),
+            ),
+            "mlp.gate_proj": self.colwise_parallel(),
+            "mlp.up_proj": self.colwise_parallel(),
+            "mlp.down_proj": self.rowwise_parallel(output_layouts=Shard(1)),
+            "mlp.swiglu_linear": SwiGLULinearParallel(
+                output_layouts=Shard(1)
+            )
+        }
+
+
+class TransformerTPPlan(TPPlan):
+
+    @property
+    def attn_plan(self):
+        return {
+            "attn": self.prepare_module_input(
+                input_kwarg_layouts={"hidden_states": Shard(1)},
+                desired_input_kwarg_layouts={"hidden_states": Replicate()},
+            ),
+            "attn.q_proj": self.colwise_parallel(),
+            "attn.k_proj": self.colwise_parallel(),
+            "attn.v_proj": self.colwise_parallel(),
+            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1))
+        }
+
+
+class GLATPPlan(TPPlan):
+
+    @property
+    def attn_plan(self):
+        return {
+            "attn": self.prepare_module_input(
+                input_kwarg_layouts={"hidden_states": Shard(1)},
+                desired_input_kwarg_layouts={"hidden_states": Replicate()},
+            ),
+            "attn.q_proj": self.colwise_parallel(),
+            "attn.k_proj": self.colwise_parallel(),
+            "attn.v_proj": self.colwise_parallel(),
+            "attn.g_proj": self.colwise_parallel(),
+            "attn.gk_proj.0": PrepareModuleWeight(layouts=Replicate()),
+            "attn.gk_proj.1": self.colwise_parallel(),
+            "attn.g_norm": SequenceParallel(sequence_dim=-1),
+            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1))
+        }
+
+
+TP_PLAN_MAP = {
+    "transformer": TransformerTPPlan,
+    "gla": GLATPPlan
+}
+
+
 def apply_tp(
     model: nn.Module,
     tp_mesh: DeviceMesh,
@@ -112,22 +250,18 @@ def apply_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
-    from flame.parallelisms.tp_helper import dispatch_tp_plan
-
-    tp_plan = dispatch_tp_plan(model, loss_parallel=loss_parallel, enable_float8=enable_float8)
-    parallelize_module(model, tp_mesh, tp_plan.others_plan)
+    tp_plan = TP_PLAN_MAP[model.config.model_type](model, loss_parallel=loss_parallel, enable_float8=enable_float8)
+    parallelize_module(model, tp_mesh, tp_plan.model_plan)
 
     blocks = get_blocks(model)
     if blocks is None:
-        logger.warning("No TransformerBlock found for tensor parallelism")
+        logger.warning("No block found for tensor parallelism")
     else:
         for _, block in enumerate(blocks):
-            layer_plan = dispatch_tp_plan(block).layer_plan
-
             parallelize_module(
                 module=block,
                 device_mesh=tp_mesh,
-                parallelize_plan=layer_plan,
+                parallelize_plan=tp_plan.layer_plan,
             )
 
     if enable_async_tp:
@@ -220,7 +354,7 @@ def apply_ac(model: nn.Module, ac_config):
     """Apply activation checkpointing to the model."""
     blocks = get_blocks(model)
     if blocks is None:
-        logger.warning("No TransformerBlock found for activation checkpointing")
+        logger.warning("No block found for activation checkpointing")
         return
 
     for layer_id, block in blocks.named_children():
@@ -291,7 +425,7 @@ def apply_fsdp(
 
     blocks = get_blocks(model)
     if blocks is None:
-        logger.warning("No TransformerBlock found for FSDP")
+        logger.warning("No block found for FSDP")
     else:
         total_blocks = len(blocks)
         for layer_id, block in enumerate(blocks):
@@ -338,10 +472,6 @@ def apply_ddp(
     replicate(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
     logger.info("Applied DDP to the model")
-
-
-# ================================================================================================
-# below are monkey-patched functions for the FLA model
 
 
 def get_blocks(model):

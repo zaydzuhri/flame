@@ -17,7 +17,7 @@ from torch.distributed.checkpoint.stateful import Stateful
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer
 
-from torchtitan.logging import logger
+from torchtitan.tools.logging import logger
 
 
 class BufferShuffledIterableDataset(IterableDataset):
@@ -435,7 +435,7 @@ class DataCollatorForLanguageModeling:
         return batch
 
 
-class DPAwareDataLoader(StatefulDataLoader, Stateful):
+class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
     """
     A wrapper around the StatefulDataLoader that ensures that the state is stored only once per DP rank.
     """
@@ -503,7 +503,7 @@ def build_dataloader(
         rank=rank,
         world_size=world_size
     )
-    return DPAwareDataLoader(
+    return ParallelAwareDataLoader(
         rank=rank,
         dataset=dataset,
         batch_size=batch_size,

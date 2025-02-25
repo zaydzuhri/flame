@@ -31,7 +31,6 @@ varlen = false
 [optimizer]
 name = "AdamW"
 eps = 1e-15
-fused = true
 lr = 3e-4
 min_lr_ratio = 0.1
 scheduler = 'wsd'

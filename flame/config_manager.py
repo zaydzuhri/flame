@@ -16,7 +16,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-from torchtitan.logging import logger
+from torchtitan.tools.logging import logger
 
 TORCH_DTYPE_MAP = {
     "float16": torch.float16,
@@ -102,6 +102,12 @@ class JobConfig:
 
         # model configs
         self.parser.add_argument(
+            "--model.name",
+            type=str,
+            default="fla",
+            help="Which model to train",
+        )
+        self.parser.add_argument(
             "--model.config",
             type=str,
             default="fla-hub/gla-1.3B-100B",
@@ -167,11 +173,6 @@ class JobConfig:
             help="Epsilon value for the optimizer.",
         )
         self.parser.add_argument(
-            "--optimizer.fused",
-            action="store_true",
-            help="Whether the fused implementation(CUDA only) is used.",
-        )
-        self.parser.add_argument(
             "--optimizer.scheduler",
             type=str,
             default="cosine",
@@ -186,6 +187,19 @@ class JobConfig:
             type=float,
             default=0.1,
             help="Min lr ratio for lr scheduler",
+        )
+        self.parser.add_argument(
+            "--optimizer.implementation",
+            type=str,
+            default="fused",
+            choices=["for-loop", "foreach", "fused"],
+            help="""
+            Specify which optimizer implementation to use:
+            - 'fused': Use fused implementation (CUDA only) for best performance.
+            - 'foreach': Use some horizontal fusion of tensors for better performance.
+            - 'for-loop': Use the default implementation for the optimizer (slowest).
+            - more info: https://pytorch.org/docs/stable/optim.html
+            """,
         )
         self.parser.add_argument(
             "--optimizer.early_step_in_backward",

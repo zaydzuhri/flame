@@ -33,7 +33,6 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
   --optimizer.eps 1e-15 \
-  --optimizer.fused \
   --optimizer.lr 3e-4 \
   --optimizer.min_lr_ratio 0.1 \
   --optimizer.scheduler cosine \
