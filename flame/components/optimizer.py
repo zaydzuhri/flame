@@ -8,6 +8,7 @@ import math
 from functools import partial
 from typing import List
 
+import torch
 import torch.nn as nn
 
 from torchtitan.components.optimizer import (LRSchedulersContainer,
@@ -64,11 +65,17 @@ def build_optimizers(
         "fused": fused,
         "foreach": foreach,
     }
-
+    optimizer_classes = {
+        "Adam": torch.optim.Adam,
+        "AdamW": torch.optim.AdamW,
+    }
+    if name not in optimizer_classes:
+        raise NotImplementedError(f"Optimizer {name} not added.")
+    optimizer_cls = optimizer_classes[name]
     return (
-        OptimizersContainer(model_parts, optimizer_kwargs, name)
+        OptimizersContainer(model_parts, optimizer_cls, optimizer_kwargs)
         if not optim_in_bwd
-        else OptimizersInBackwardContainer(model_parts, optimizer_kwargs, name)
+        else OptimizersInBackwardContainer(model_parts, optimizer_cls, optimizer_kwargs)
     )
 
 

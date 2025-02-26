@@ -13,7 +13,7 @@ from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
-from torchtitan.logging import init_logger, logger
+from torchtitan.tools.logging import init_logger, logger
 
 
 @torch.inference_mode()

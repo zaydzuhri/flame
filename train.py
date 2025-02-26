@@ -365,7 +365,7 @@ def main(job_config: JobConfig):
     model_converters.convert(model)
 
     # log model size
-    model_param_count = model.num_parameters()
+    model_param_count = get_num_params(model)
     num_flop_per_token = get_num_flop_per_token(
         get_num_params(model, exclude_embedding=True),
         model_config,

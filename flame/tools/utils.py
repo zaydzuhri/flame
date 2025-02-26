@@ -4,17 +4,17 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import torch
 import torch.nn as nn
 
 from torchtitan.tools.logging import logger
 
 
-def get_num_params(model: torch.nn.Module, exclude_embedding: bool = False) -> int:
+def get_num_params(model: nn.Module, exclude_embedding: bool = False) -> int:
     num_params = sum(p.numel() for p in model.parameters())
     if exclude_embedding:
         num_params -= sum(
-            i.num_parameters() for i in model.children() if isinstance(i, nn.Embedding)
+            sum(p.numel() for p in m.parameters())
+            for m in model.children() if isinstance(m, nn.Embedding)
         )
     return num_params
 
