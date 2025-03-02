@@ -561,7 +561,7 @@ def main(job_config: JobConfig):
                 """
                 position_ids = torch.arange(
                     0, input_ids.shape[1], device=device_type
-                ).repeat(input_ids.shape[0], 1)
+                ).repeat(input_ids.shape[0], 1).to(torch.int32)
 
                 labels = labels.to(device_type)
                 cu_seqlens = (
