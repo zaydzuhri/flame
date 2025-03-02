@@ -18,8 +18,8 @@ from torchtitan.tools.logging import init_logger, logger
 
 @torch.inference_mode()
 def save_pretrained(
-    checkpoint: str,
     path: str,
+    step: int,
     config: str,
     tokenizer: str
 ):
@@ -34,6 +34,7 @@ def save_pretrained(
     tokenizer.save_pretrained(path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        checkpoint = os.path.join(path, f'checkpoint/step-{step}')
         checkpoint_path = os.path.join(tmpdir, 'checkpoint.pt')
         logger.info(f"Saving the distributed checkpoint to {checkpoint_path}")
         dcp_to_torch_save(checkpoint, checkpoint_path)
@@ -55,9 +56,9 @@ def save_pretrained(
 if __name__ == "__main__":
     init_logger()
     parser = argparse.ArgumentParser("Convert DCP format model weights to huggingface-style.")
-    parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--path", type=str, required=True)
+    parser.add_argument("--step", type=int, required=True)
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--tokenizer", type=str, required=True)
     args = parser.parse_args()
-    save_pretrained(args.checkpoint, args.path, args.config, args.tokenizer)
+    save_pretrained(args.path, args.step, args.config, args.tokenizer)
