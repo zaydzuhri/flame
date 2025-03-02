@@ -22,7 +22,7 @@ from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
-from flame.tools.utils import get_num_flop_per_token, get_num_params
+from flame.tools.utils import get_num_flop_per_token
 from torchtitan.components.loss import cross_entropy_loss
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
@@ -365,9 +365,9 @@ def main(job_config: JobConfig):
     model_converters.convert(model)
 
     # log model size
-    model_param_count = get_num_params(model)
+    model_param_count = utils.get_num_params(model)
     num_flop_per_token = get_num_flop_per_token(
-        get_num_params(model, exclude_embedding=True),
+        utils.get_num_params(model, exclude_embedding=True),
         model_config,
         job_config.training.context_len,
     )
