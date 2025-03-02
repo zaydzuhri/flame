@@ -110,13 +110,13 @@ class JobConfig:
         self.parser.add_argument(
             "--model.config",
             type=str,
-            default="fla-hub/gla-1.3B-100B",
+            default="fla-hub/transformer-1.3B-100B",
             help="Path to the model config",
         )
         self.parser.add_argument(
             "--model.tokenizer_path",
             type=str,
-            default="fla-hub/gla-1.3B-100B",
+            default="fla-hub/transformer-1.3B-100B",
             help="Tokenizer path",
         )
         self.parser.add_argument(
@@ -129,6 +129,14 @@ class JobConfig:
                 For instance, the `float8` converter swaps `torch.nn.Linear`
                 with `Float8Linear`. This feature requires you to install 'torchao'
                 which can be found here: https://github.com/pytorch/ao
+            """,
+        )
+        self.parser.add_argument(
+            "--model.print_after_conversion",
+            action="store_true",
+            help="""
+            If true, model definition will be printed to stdout after all model
+            converters have been applied.
             """,
         )
 
@@ -573,16 +581,10 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
-            "--checkpoint.interval_type",
-            type=str,
-            default="steps",
-            help="Checkpointing interval unit of measurement ['step', 'seconds']",
-        )
-        self.parser.add_argument(
             "--checkpoint.interval",
             type=int,
             default=500,
-            help="Checkpointing interval, in steps or seconds depending on --checkpoint.interval_type",
+            help="Checkpointing interval in steps.",
         )
         self.parser.add_argument(
             "--checkpoint.model_weights_only",
@@ -642,7 +644,8 @@ class JobConfig:
             default=0,
             help="""
                 Keeps only the latest k checkpoints, and purging older ones. If 0, keep all checkpoints.
-                0 is the default value.
+                0 is the default value. k cannot be 1 as the last one may be in the process of being
+                saved. As a result, the metadata of the last one may not be ready yet.
             """,
         )
         self.parser.add_argument(
@@ -679,15 +682,36 @@ class JobConfig:
             """,
         )
 
+        # float8 configs
         self.parser.add_argument(
             "--float8.enable_fsdp_float8_all_gather",
             action="store_true",
-            help="Whether enable float8 all-gather in FSDP",
+            help="Whether enable float8 all-gather in FSDP, recommended for tensorwise scaling",
         )
         self.parser.add_argument(
             "--float8.precompute_float8_dynamic_scale_for_fsdp",
             action="store_true",
-            help="Whether precompute float8 scales dynamically for FSDP",
+            help="Whether precompute float8 scales dynamically for FSDP, recommended for tensorwise scaling",
+        )
+        self.parser.add_argument(
+            "--float8.force_recompute_fp8_weight_in_bwd",
+            action="store_true",
+            help="""
+            Whether to force the recomputation of FP8 weights during backward pass.
+            When using FSDP with tensorwise scaling, it is recommended to enable
+            `force_recompute_fp8_weight_in_bwd` to prevent saving unsharded FP8 weights
+            for backward computation.
+            """,
+        )
+        self.parser.add_argument(
+            "--float8.recipe_name",
+            type=str,
+            default=None,
+            choices=["tensorwise", "rowwise", "rowwise_with_gw_hp"],
+            help="""
+            If specified, creates float8 config from recipe name, valid choices are
+            `tensorwise`, `rowwise` and `rowwise_with_gw_hp`.
+            """,
         )
 
         # communications library settings
@@ -724,6 +748,44 @@ class JobConfig:
             "--memory_estimation.disable_fake_mode",
             help="Whether to estimate memory under FakeTensorMode",
             action="store_true",
+        )
+
+        self.parser.add_argument(
+            "--fault_tolerance.enable",
+            action="store_true",
+            help="""
+                Enable TorchFT integration. When TorchFT is enabled, HSDP will be used.
+                And --fault_tolerance.data_parallel_replicate_degree should be 1 and
+                --fault_tolerance.group_size will be used to control the maximum
+                replicate group size as the replicate group size is dynamic.
+
+                Note that this is still an experimental feature.
+            """,
+        )
+
+        self.parser.add_argument(
+            "--fault_tolerance.replica_id",
+            type=int,
+            default=0,
+            help="The TorchFT replica ID of this run.",
+        )
+
+        self.parser.add_argument(
+            "--fault_tolerance.group_size",
+            type=int,
+            default=0,
+            help="""
+                The number of TorchFT replicate groups. This number will be used for
+                dataloader to split the dataset across the replicate groups and FSDP
+                dimension
+            """,
+        )
+
+        self.parser.add_argument(
+            "--fault_tolerance.min_replica_size",
+            type=int,
+            default=1,
+            help="The minimum number of FT replica for each step.",
         )
 
     def to_dict(self):
