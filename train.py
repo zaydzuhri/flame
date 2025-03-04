@@ -16,14 +16,17 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
-from flame.components.checkpoint import CheckpointManager, TrainState
-from flame.components.optimizer import build_lr_schedulers, build_optimizers
+from flame.components.checkpoint import TrainState
+from flame.components.optimizer import build_lr_schedulers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_num_flop_per_token
+from torchtitan.components.checkpoint import CheckpointManager
+from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import cross_entropy_loss
+from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
@@ -70,23 +73,39 @@ def main(job_config: JobConfig):
         logger.info(
             f"{color.green}{json.dumps(job_config.to_dict(), indent=2, sort_keys=True)}{color.reset}"
         )
+
     # take control of garbage collection to avoid stragglers
     gc_handler = utils.GarbageCollection(gc_freq=job_config.training.gc_freq)
 
-    # init distributed
-    world_size = int(os.environ["WORLD_SIZE"])
-    parallel_dims = ParallelDims(
-        dp_shard=job_config.training.data_parallel_shard_degree,
-        dp_replicate=job_config.training.data_parallel_replicate_degree,
-        cp=job_config.experimental.context_parallel_degree,
-        tp=job_config.training.tensor_parallel_degree,
-        pp=job_config.experimental.pipeline_parallel_degree,
-        world_size=world_size,
-        enable_loss_parallel=not job_config.training.disable_loss_parallel,
-    )
     device_module, device_type = utils.device_module, utils.device_type
     device = torch.device(f"{device_type}:{int(os.environ['LOCAL_RANK'])}")
+    # Device has to be set before creating TorchFT manager.
     device_module.set_device(device)
+    ft_manager = init_ft_manager(job_config)
+
+    # init distributed
+    world_size = int(os.environ["WORLD_SIZE"])
+    if not ft_manager.enabled:
+        parallel_dims = ParallelDims(
+            dp_shard=job_config.training.data_parallel_shard_degree,
+            dp_replicate=job_config.training.data_parallel_replicate_degree,
+            cp=job_config.experimental.context_parallel_degree,
+            tp=job_config.training.tensor_parallel_degree,
+            pp=job_config.experimental.pipeline_parallel_degree,
+            world_size=world_size,
+            enable_loss_parallel=not job_config.training.disable_loss_parallel,
+        )
+    else:
+        parallel_dims = FTParallelDims(
+            dp_shard=job_config.training.data_parallel_shard_degree,
+            dp_replicate=job_config.training.data_parallel_replicate_degree,
+            cp=job_config.experimental.context_parallel_degree,
+            tp=job_config.training.tensor_parallel_degree,
+            pp=job_config.experimental.pipeline_parallel_degree,
+            world_size=world_size,
+            enable_loss_parallel=not job_config.training.disable_loss_parallel,
+            ft_manager=ft_manager,
+        )
     dist_utils.init_distributed(job_config)
     # initialize device memory monitor and get peak flops for MFU calculation
     device_memory_monitor = build_device_memory_monitor()
@@ -428,7 +447,7 @@ def main(job_config: JobConfig):
     )
 
     # build optimizer after applying parallelisms to the model
-    optimizers = train_spec.build_optimizers_fn(model_parts, job_config)
+    optimizers = train_spec.build_optimizers_fn(model_parts, job_config, ft_manager)
     lr_schedulers = train_spec.build_lr_schedulers_fn(optimizers, job_config)
     # Post optimizer step model converters hook.
     # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
@@ -447,6 +466,7 @@ def main(job_config: JobConfig):
         lr_schedulers=lr_schedulers,
         states={"train_state": train_state},
         job_config=job_config,
+        ft_manager=ft_manager,
     )
 
     if job_config.checkpoint.create_seed_checkpoint:
@@ -486,8 +506,6 @@ def main(job_config: JobConfig):
     data_loading_times = []
     time_last_log = time.perf_counter()
     device_memory_monitor.reset_peak_stats()
-
-    checkpoint.reset()
 
     global_batch_size = (
         job_config.training.batch_size

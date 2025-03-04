@@ -6,77 +6,14 @@
 
 import math
 from functools import partial
-from typing import List
-
-import torch
-import torch.nn as nn
 
 from torchtitan.components.optimizer import (LRSchedulersContainer,
-                                             OptimizersContainer,
-                                             OptimizersInBackwardContainer)
+                                             OptimizersContainer)
 from torchtitan.config_manager import JobConfig
 
 __all__ = [
-    "build_optimizers",
     "build_lr_schedulers",
 ]
-
-
-def build_optimizers(
-    model_parts: List[nn.Module], job_config: JobConfig
-) -> OptimizersContainer:
-    """Create a OptimizersContainer for the given model parts and job config.
-
-    This function creates a ``OptimizersContainer`` for the given model parts.
-    ``job_config`` should define the correct optimizer name and parameters.
-    This function currently supports creating ``OptimizersContainer`` and
-    ``OptimizersInBackwardContainer``.
-
-    **Note**
-    Users who want to customize the optimizer behavior can create their own
-    ``OptimizersContainer`` subclass and ``build_optimizers``. Passing the
-    customized ``build_optimizers`` to ``TrainSpec`` will create the customized
-    ``OptimizersContainer``.
-
-    Args:
-        model_parts (List[nn.Module]): List of model parts to be optimized.
-        job_config (JobConfig): Job config containing the optimizer name and parameters.
-    """
-    optim_in_bwd = job_config.optimizer.early_step_in_backward
-    if optim_in_bwd and job_config.experimental.pipeline_parallel_degree > 1:
-        raise NotImplementedError(
-            "Optimizers in backward is not supported with pipeline parallelism."
-        )
-    name = job_config.optimizer.name
-    lr = job_config.optimizer.lr
-    eps = job_config.optimizer.eps
-
-    optim_implementation = job_config.optimizer.implementation
-    assert optim_implementation in ["fused", "foreach", "for-loop"]
-
-    fused = optim_implementation == "fused"
-    foreach = optim_implementation == "foreach"
-
-    optimizer_kwargs = {
-        "lr": lr,
-        "betas": (0.9, 0.95),
-        "weight_decay": 0.1,
-        "eps": eps,
-        "fused": fused,
-        "foreach": foreach,
-    }
-    optimizer_classes = {
-        "Adam": torch.optim.Adam,
-        "AdamW": torch.optim.AdamW,
-    }
-    if name not in optimizer_classes:
-        raise NotImplementedError(f"Optimizer {name} not added.")
-    optimizer_cls = optimizer_classes[name]
-    return (
-        OptimizersContainer(model_parts, optimizer_cls, optimizer_kwargs)
-        if not optim_in_bwd
-        else OptimizersInBackwardContainer(model_parts, optimizer_cls, optimizer_kwargs)
-    )
 
 
 def linear_scheduler_lambda(
