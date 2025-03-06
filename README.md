@@ -421,6 +421,9 @@ python convert_dcp_to_hf.py --path <path_to_model> --step <step> --config <path_
 After this, your model will be in the 🤗 format, ready to be shared or deployed. 
 You can then easily publish your model using the `huggingface_hub` for wider accessibility.
 
+> [!NOTE]  
+> We have done this conversion automatically in the training script since our latest updates.
+
 ### Continual training
 
 If you wish to build upon a strong pre-trained model (in 🤗 format) and continue training, we also offer a script to convert the 🤗 format model back into DCP format. 
