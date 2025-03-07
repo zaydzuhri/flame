@@ -4,10 +4,7 @@
 
 </div>
  
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency.
-
-`Flame` is a **general-purpose trainer**, not limited to linear attention but applicable to arbitrary models. Now, It is essentially `torchTitan` with a `HuggingFace` interface, enabling both fast training and convenient evaluation. 
-
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency. 
 
 **Feature Highlights:**
 
@@ -419,10 +416,13 @@ Once training is complete, you may want to convert the distributed checkpoints (
 To facilitate this, we provide a straightforward conversion script:
 
 ```sh
-python convert_dcp_to_hf.py --checkpoint <path_to_dcp> --path <path_to_hf> --config <path_to_config> --tokenizer <path_to_tokenizer>
+python convert_dcp_to_hf.py --path <path_to_model> --step <step> --config <path_to_config> --tokenizer <path_to_tokenizer>
 ```
 After this, your model will be in the 🤗 format, ready to be shared or deployed. 
 You can then easily publish your model using the `huggingface_hub` for wider accessibility.
+
+> [!NOTE]  
+> We have done this conversion automatically in the training script since our latest updates.
 
 ### Continual training
 

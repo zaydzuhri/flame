@@ -62,6 +62,10 @@ echo "Launching training..."
 
 set -x
 path=$(grep -oP '(?<=--job.dump_folder )[^ ]+' <<< "$params")
+steps=$(grep -oP '(?<=--training.steps )[^ ]+' <<< "$params")
+config=$(grep -oP '(?<=--model.config )[^ ]+' <<< "$params")
+tokenizer=$(grep -oP '(?<=--model.tokenizer_path )[^ ]+' <<< "$params")
+
 mkdir -p $path
 cp * $path
 cp -r configs $path
@@ -97,5 +101,13 @@ torchrun --nnodes=${NNODE} \
   --tee 3 \
   train.py \
   $params
+
+echo "TRAINING DONE!"
+echo "Converting the DCP checkpoints to HF format..."
+python convert_dcp_to_hf.py \
+  --path $path \
+  --step $steps \
+  --config $config \
+  --tokenizer $tokenizer
 
 echo "RUNNING DONE!"
