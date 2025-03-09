@@ -16,6 +16,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
+from fla.ops.common.utils import prepare_position_ids
 from flame.components.checkpoint import TrainState
 from flame.components.optimizer import build_lr_schedulers
 from flame.config_manager import JobConfig
@@ -577,16 +578,18 @@ def main(job_config: JobConfig):
                     Each rank has the coresponding chunked position_ids. [FOR All model]
 
                 """
-                position_ids = torch.arange(
-                    0, input_ids.shape[1], device=device_type
-                ).repeat(input_ids.shape[0], 1).to(torch.int32)
-
                 labels = labels.to(device_type)
                 cu_seqlens = (
                     batch["cu_seqlens"].to(device_type)
                     if "cu_seqlens" in batch
                     else None
                 )
+                if cu_seqlens is not None:
+                    position_ids = prepare_position_ids(cu_seqlens).to(torch.int32)
+                else:
+                    position_ids = torch.arange(
+                        0, input_ids.shape[1], device=device_type
+                    ).repeat(input_ids.shape[0], 1).to(torch.int32)
                 # apply context parallelism if cp is enabled
                 # ensure CP handles the separate freqs_cis buffer for each pp stage
                 optional_context_parallel_ctx = (
