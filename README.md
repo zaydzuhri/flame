@@ -30,33 +30,28 @@ git submodule update --init --recursive
 ```
 
 ## Dataset Preparation
+To download the dataset to your local disk, create a new Python file with the following content and execute it:
 
-`flame` streamlines dataset handling with smart on-the-fly processing. 
-
-For most datasets:
 ```py
 from datasets import load_dataset
 
 # load fineweb-edu with parallel processing
 dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64, cache_dir="/your/cache/path")
 
-# load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
+# or load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
 dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64, cache_dir="/your/cache/path")
 ```
 
-For SlimPajama-627B (used in [GLA paper](https://proceedings.mlr.press/v235/yang24ab.html)):
-```bash
-git lfs install
-git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B --depth 1
-```
+More easily, you can also do it in a streaming manner by training the model and downloading the model at the same time. However, this is highly nonrecommendable, as it will encounter lots of network issues (a bitter lesson learnt by Songlin)
+
+
 
 ## Training Recipes
 
-> [!NOTE]
-> It's always recommended to run the following commands to first ensure that the dataset is downloaded locally before training begins.
-> This step helps prevent network issues that might interrupt the training process when using streaming mode.
+Here's an example of training a 340M FLA Transformer model with a LLaMA-like architecture from scratch on a 100BT subset of the Fineweb-edu corpus in streaming mode.
 
-Here's an example of how to train a 340M FLA transformer model with Llama-like architecture from scratch:
+### ⚠️ CAUTION  
+If the dataset is not downloaded beforehand, the streaming mode will attempt to fetch it from a remote server and download it on-the-fly, which can be highly unstable during training due to network issues. For stable training, ensure the dataset is downloaded locally (see [**Dataset Preparation**](#dataset-preparation)). Otherwise, we assume you are only testing the new corpus.
 
 ```sh
 bash train.sh \
