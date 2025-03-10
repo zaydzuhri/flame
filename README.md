@@ -31,18 +31,17 @@ git submodule update --init --recursive
 
 ## Dataset Preparation
 
-> [!NOTE]
-> It's always recommended to run the following commands to first ensure that the dataset is downloaded locally before training begins.
-> This step helps prevent network issues that might interrupt the training process when using streaming mode.
-
 `flame` streamlines dataset handling with smart on-the-fly processing. 
 
 For most datasets:
 ```py
 from datasets import load_dataset
 
-# Load fineweb-edu with parallel processing
+# load fineweb-edu with parallel processing
 dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64)
+
+# load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64)
 ```
 
 For SlimPajama-627B (used in [GLA paper](https://proceedings.mlr.press/v235/yang24ab.html)):
@@ -52,6 +51,10 @@ git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B --depth 1
 ```
 
 ## Training Recipes
+
+> [!NOTE]
+> It's always recommended to run the following commands to first ensure that the dataset is downloaded locally before training begins.
+> This step helps prevent network issues that might interrupt the training process when using streaming mode.
 
 Here's an example of how to train a 340M FLA transformer model with Llama-like architecture from scratch:
 
