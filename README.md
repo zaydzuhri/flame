@@ -4,7 +4,7 @@
 
 </div>
  
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency. 
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency. 
 
 **Feature Highlights:**
 
@@ -41,10 +41,6 @@ dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64,
 # or load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
 dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64, cache_dir="/your/cache/path")
 ```
-
-More easily, you can also do it in a streaming manner by training the model and downloading the model at the same time. However, this is highly nonrecommendable, as it will encounter lots of network issues (a bitter lesson learnt by Songlin)
-
-
 
 ## Training Recipes
 
