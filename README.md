@@ -71,7 +71,7 @@ bash train.sh \
   --training.max_norm 1.0 \
   --training.skip_nan_inf \
   --training.dataset HuggingFaceFW/fineweb-edu \
-  --training.dataset_name default \
+  --training.dataset_name sample-100BT \
   --training.dataset_split train \
   --training.streaming \
   --training.num_workers 32 \
