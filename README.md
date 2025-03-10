@@ -38,10 +38,10 @@ For most datasets:
 from datasets import load_dataset
 
 # load fineweb-edu with parallel processing
-dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64)
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64, cache_dir="/your/cache/path")
 
 # load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
-dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64)
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64, cache_dir="/your/cache/path")
 ```
 
 For SlimPajama-627B (used in [GLA paper](https://proceedings.mlr.press/v235/yang24ab.html)):
