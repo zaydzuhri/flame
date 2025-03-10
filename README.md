@@ -31,6 +31,10 @@ git submodule update --init --recursive
 
 ## Dataset Preparation
 
+> [!NOTE]
+> It's always recommended to run the following commands to first ensure that the dataset is downloaded locally before training begins.
+> This step helps prevent network issues that might interrupt the training process when using streaming mode.
+
 `flame` streamlines dataset handling with smart on-the-fly processing. 
 
 For most datasets:
