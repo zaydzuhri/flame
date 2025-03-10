@@ -77,6 +77,7 @@ bash train.sh \
   --training.seed 42 \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
+  --checkpoint.keep_latest_k 2 \
   --metrics.log_freq 4
 ```
 
