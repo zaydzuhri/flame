@@ -85,6 +85,9 @@ bash train.sh \
   --metrics.log_freq 4
 ```
 
+You can specify the number of GPUs by setting the environment variable `NGPU`, which defaults to 8.  
+**For single-GPU debugging, set `NGPU=1`.**
+
 We provide several [config files](https://github.com/fla-org/flame/tree/main/configs) for different models. 
 By default, the learning rate is set to 3e-4 with a cosine scheduler. Other schedulers, such as WSD (wsd), are also supported.
 For a detailed explanation of all parameters, run:
