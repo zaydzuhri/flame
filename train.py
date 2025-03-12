@@ -28,6 +28,9 @@ from flame.tools.utils import get_num_flop_per_token
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import cross_entropy_loss
+from torchtitan.components.metrics import (_build_metric_logger,
+                                           build_device_memory_monitor,
+                                           ensure_pp_loss_visible)
 from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
@@ -36,9 +39,6 @@ from torchtitan.protocols.train_spec import (TrainSpec, get_train_spec,
                                              register_train_spec)
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
-from torchtitan.tools.metrics import (build_device_memory_monitor,
-                                      build_metric_logger,
-                                      ensure_pp_loss_visible)
 from torchtitan.tools.profiling import (maybe_enable_memory_snapshot,
                                         maybe_enable_profiling)
 
@@ -449,7 +449,6 @@ def main(job_config: JobConfig):
 
         # confirm that user will be able to view loss metrics on the console
         ensure_pp_loss_visible(parallel_dims, job_config, color)
-
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         train_spec.parallelize_fn(model, world_mesh, parallel_dims, job_config)
@@ -502,7 +501,7 @@ def main(job_config: JobConfig):
         return
 
     checkpoint.load(step=job_config.checkpoint.load_step)
-    metric_logger = build_metric_logger(job_config, parallel_dims)
+    metric_logger = _build_metric_logger(job_config, parallel_dims)
 
     # plot losses loaded from checkpoint (if any) to TensorBoard
     # NOTE: Loss info after the last log step before checkpoint saving will not be ploted.
@@ -659,9 +658,7 @@ def main(job_config: JobConfig):
                     )
                 else:
                     # Non-PP forward / backward
-                    with train_context(
-                        optional_context_parallel_ctx, activation_offload_context
-                    ):
+                    with train_context(optional_context_parallel_ctx):
                         output = model(
                             input_ids=input_ids,
                             labels=labels,
