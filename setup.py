@@ -44,5 +44,7 @@ setup(
         'einops',
         'ninja',
         'wandb',
+        'tiktoken',
+        'tensorboard',
     ],
 )

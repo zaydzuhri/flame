@@ -24,6 +24,8 @@ dependencies = [
     'einops',
     'ninja',
     'wandb',
+    'tiktoken',
+    'tensorboard',
 ]
 
 [project.optional-dependencies]
