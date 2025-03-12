@@ -181,20 +181,7 @@ class JobConfig:
             help="Epsilon value for the optimizer.",
         )
         self.parser.add_argument(
-            "--optimizer.scheduler",
-            type=str,
-            default="cosine",
-            choices=["wsd", "cosine", "linear"],
-            help="Scheduler to use. Currently supported: wsd, cosine, and linear.",
-        )
-        self.parser.add_argument(
             "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
-        )
-        self.parser.add_argument(
-            "--optimizer.min_lr_ratio",
-            type=float,
-            default=0.1,
-            help="Min lr ratio for lr scheduler",
         )
         self.parser.add_argument(
             "--optimizer.implementation",
@@ -218,6 +205,51 @@ class JobConfig:
             register_post_accumulate_grad_hook after the optimizer is built.""",
         )
 
+        # lr scheduler configs
+        self.parser.add_argument(
+            "--lr_scheduler.warmup_steps",
+            type=int,
+            default=200,
+            help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
+        )
+        self.parser.add_argument(
+            "--lr_scheduler.decay_ratio",
+            type=float,
+            default=None,
+            help="""
+            Controls the proportion of the training steps allocated to the learning rate decay phase.
+
+            If `None`, the learning rate will begin decaying immediately after the warmup period.
+            Otherwise, the learning rate will remain stable after the warmup period and
+            only start decaying during the last `decay_ratio` portion of the total training steps.
+
+            This is known as the Warmup-Stable-Decay (WSD) schedule, as described in https://arxiv.org/abs/2404.06395.
+            """,
+        )
+        self.parser.add_argument(
+            "--lr_scheduler.decay_type",
+            type=str,
+            default="linear",
+            choices=["linear", "sqrt", "cosine"],
+            help="""
+            Learning rate decay type to use during training:
+            - 'linear': linearly decays learning rate from initial to final value
+            - 'sqrt': decays learning rate following a 1 minus square root curve
+            - 'cosine': smoothly decays learning rate following a cosine curve
+            """,
+        )
+        self.parser.add_argument(
+            "--lr_scheduler.lr_min",
+            type=float,
+            default=0.0,
+            help="""
+            Min lr ratio for lr scheduler.
+
+            If provided, the range of decay factor is scaled from 1 to `lr_min`
+            to ensure the learning rate does not drop below `optimizer.lr * lr_scheduler.lr_min`.
+            """,
+        )
+
         # training configs
         self.parser.add_argument(
             "--training.batch_size", type=int, default=8, help="Batch size"
@@ -235,12 +267,6 @@ class JobConfig:
             "--training.varlen",
             action="store_true",
             help="Whether to take sequences of variable length as input",
-        )
-        self.parser.add_argument(
-            "--training.warmup_steps",
-            type=int,
-            default=200,
-            help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
         )
         self.parser.add_argument(
             "--training.gradient_accumulation_steps",

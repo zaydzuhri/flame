@@ -34,11 +34,11 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --optimizer.name AdamW \
   --optimizer.eps 1e-15 \
   --optimizer.lr 3e-4 \
-  --optimizer.min_lr_ratio 0.1 \
-  --optimizer.scheduler cosine \
+  --lr_scheduler.warmup_steps 1024 \
+  --lr_scheduler.lr_min 0.1 \
+  --lr_scheduler.decay_type cosine \
   --training.batch_size 32 \
   --training.seq_len 2048 \
-  --training.warmup_steps 1024 \
   --training.gradient_accumulation_steps 1 \
   --training.steps 20480 \
   --training.max_norm 1.0 \

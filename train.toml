@@ -10,7 +10,6 @@ print_args = true
 batch_size = 32
 seq_len = 2048
 context_len = 2048
-warmup_steps = 1024
 gradient_accumulation_steps = 1
 steps = 20480
 max_norm = 1.0
@@ -32,8 +31,11 @@ varlen = false
 name = "AdamW"
 eps = 1e-15
 lr = 3e-4
-min_lr_ratio = 0.1
-scheduler = 'wsd'
+
+[lr_scheduler]
+warmup_steps = 1024
+decay_type = "cosine"
+lr_min = 0.1
 
 [checkpoint]
 enable_checkpoint = true

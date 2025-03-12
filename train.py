@@ -18,10 +18,8 @@ import fla  # noqa
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from fla.ops.common.utils import prepare_position_ids
 from flame.components.checkpoint import TrainState
-from flame.components.optimizer import build_lr_schedulers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
-from flame.models.activation_offloading import get_act_offloading_ctx_manager
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_num_flop_per_token
@@ -31,7 +29,8 @@ from torchtitan.components.loss import cross_entropy_loss
 from torchtitan.components.metrics import (_build_metric_logger,
                                            build_device_memory_monitor,
                                            ensure_pp_loss_visible)
-from torchtitan.components.optimizer import build_optimizers
+from torchtitan.components.optimizer import (build_lr_schedulers,
+                                             build_optimizers)
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
@@ -521,11 +520,6 @@ def main(job_config: JobConfig):
         job_config.experimental.enable_compiled_autograd,
     )
 
-    activation_offload_context = get_act_offloading_ctx_manager(
-        model,
-        job_config.activation_offload.mode == "full",
-    )
-
     # variables used to keep info for metrics logging
     ntokens_since_last_log = 0
     data_loading_times = []
@@ -559,8 +553,8 @@ def main(job_config: JobConfig):
         f"({job_config.training.steps * num_tokens_per_step:,} tokens)"
     )
     logger.info(
-        f"{color.green}  Warmup steps = {job_config.training.warmup_steps:,}"
-        f" ({job_config.training.warmup_steps * num_tokens_per_step:,} tokens)"
+        f"{color.green}  Warmup steps = {job_config.lr_scheduler.warmup_steps:,}"
+        f" ({job_config.lr_scheduler.warmup_steps * num_tokens_per_step:,} tokens)"
     )
     logger.info(
         f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}"
