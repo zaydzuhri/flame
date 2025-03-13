@@ -415,7 +415,10 @@ For example, you can specify the following arguments to train on 6 datasets with
   --training.data_probs 0.6,0.15,0.15,0.014,0.058,0.028     \
 ```
 
-### Finalizing training
+### ~Finalizing training~
+
+> [!NOTE]  
+> We have done this conversion automatically in the training script since our latest updates.
 
 Once training is complete, you may want to convert the distributed checkpoints (DCPs) into the 🤗 format for broader use. 
 To facilitate this, we provide a straightforward conversion script:
@@ -425,9 +428,6 @@ python convert_dcp_to_hf.py --path <path_to_model> --step <step> --config <path_
 ```
 After this, your model will be in the 🤗 format, ready to be shared or deployed. 
 You can then easily publish your model using the `huggingface_hub` for wider accessibility.
-
-> [!NOTE]  
-> We have done this conversion automatically in the training script since our latest updates.
 
 ### Continual training
 
