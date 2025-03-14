@@ -3,8 +3,8 @@
 # 🔥 Flame: Flash Linear Attention Made Easy
 
 </div>
- 
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency. 
+
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency.
 
 **Feature Highlights:**
 
@@ -20,10 +20,10 @@ To get started, clone the `flame` repository and install the required dependenci
 ```bash
 git clone https://github.com/fla-org/flame.git
 cd flame
-pip install . 
+pip install .
 ```
 
-`flame` manages minimal dependencies, only including `fla` and `torchtitan` as submodules. 
+`flame` manages minimal dependencies, only including `fla` and `torchtitan` as submodules.
 After installation, initialize and update the submodules:
 ```sh
 git submodule update --init --recursive
@@ -53,7 +53,7 @@ Here's an example of training a 340M FLA Transformer model with a LLaMA-like arc
 ```sh
 bash train.sh \
   --job.config_file train.toml \
-  --job.dump_folder exp/transformer-340M-10B/batch32.seqlen2048.warmup1024.update1.steps20480.lr3e-4 \
+  --job.dump_folder exp/transformer-340M-4K-10B/batch1.seqlen65536.context4096.warmup1024.update1.steps20480.lr3e-4.cosine \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
@@ -62,8 +62,10 @@ bash train.sh \
   --lr_scheduler.warmup_steps 1024 \
   --lr_scheduler.lr_min 0.1 \
   --lr_scheduler.decay_type cosine \
-  --training.batch_size 32 \
-  --training.seq_len 2048 \
+  --training.batch_size 1 \
+  --training.seq_len 65536 \
+  --training.context_len 4096 \
+  --training.varlen \
   --training.gradient_accumulation_steps 1 \
   --training.steps 20480 \
   --training.max_norm 1.0 \
@@ -75,18 +77,27 @@ bash train.sh \
   --training.num_workers 32 \
   --training.prefetch_factor 2 \
   --training.seed 42 \
-  --training.compile \ 
+  --training.compile \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
   --checkpoint.keep_latest_k 2 \
-  --metrics.log_freq 4
+  --metrics.log_freq 1
 ```
 
 You can specify the number of GPUs by setting the environment variable `NGPU`, which defaults to 8.  
 **For single-GPU debugging, set `NGPU=1`.**
 
-We provide several [config files](https://github.com/fla-org/flame/tree/main/configs) for different models. 
+We provide several [config files](https://github.com/fla-org/flame/tree/main/configs) for different models.
 By default, the learning rate is set to 3e-4 with a cosine scheduler. Other schedulers, such as WSD (wsd), are also supported.
+
+**Key parameters:**
+- `--lr_scheduler.decay_ratio`: The proportion of the steps allocated to the decay phase. The learning rate will remain stable after the warmup period and only start decaying during the last `decay_ratio` portion of the total training steps, which is known as the Warmup-Stable-Decay (WSD) schedule.
+- `--training.batch_size`: Batch size per device, must be 1 if `--training.varlen` is set.
+- `--training.seq_len`: The length of each sequence in the batch, which is concatenated from multiple samples.
+- `--training.context_len`: The max allowed length of a sample.
+- `--training.varlen`: Whether to conduct variable-length sequence training..
+- `--training.gradient_accumulation_steps`: Number of gradient accumulation steps.
+
 For a detailed explanation of all parameters, run:
 
 ```sh
@@ -406,7 +417,7 @@ Specifically, **we recommend using `torch>=2.6` and `triton>=3.0`**.
 
 ### Training with multiple datasets
 
-If you wish to train a model with all-round capabilities (e.g., code, math, and multilingual ability), it's necessary to train on multiple datasets. 
+If you wish to train a model with all-round capabilities (e.g., code, math, and multilingual ability), it's necessary to train on multiple datasets.
 `flame` allows training with multiple datasets easily.
 For example, you can specify the following arguments to train on 6 datasets with different proportions:
 
@@ -420,31 +431,31 @@ For example, you can specify the following arguments to train on 6 datasets with
 > [!NOTE]  
 > We have done this conversion automatically in the training script since our latest updates.
 
-Once training is complete, you may want to convert the distributed checkpoints (DCPs) into the 🤗 format for broader use. 
+Once training is complete, you may want to convert the distributed checkpoints (DCPs) into the 🤗 format for broader use.
 To facilitate this, we provide a straightforward conversion script:
 
 ```sh
 python convert_dcp_to_hf.py --path <path_to_model> --step <step> --config <path_to_config> --tokenizer <path_to_tokenizer>
 ```
-After this, your model will be in the 🤗 format, ready to be shared or deployed. 
+After this, your model will be in the 🤗 format, ready to be shared or deployed.
 You can then easily publish your model using the `huggingface_hub` for wider accessibility.
 
 ### Continual training
 
-If you wish to build upon a strong pre-trained model (in 🤗 format) and continue training, we also offer a script to convert the 🤗 format model back into DCP format. 
+If you wish to build upon a strong pre-trained model (in 🤗 format) and continue training, we also offer a script to convert the 🤗 format model back into DCP format.
 This allows you to seamlessly resume training with `flame`.
 ```sh
 python convert_hf_to_dcp.py --model <path_to_hf> --checkpoint <path_to_dcp/checkpoint/step-0>
 ```
-Here, `<path_to_dcp>` is the directory where your distributed checkpoints will be stored. 
+Here, `<path_to_dcp>` is the directory where your distributed checkpoints will be stored.
 The checkpoint is intentionally saved at `<step-0>` within the checkpoint folder to ensure it is loadable by `flame` during the initial training step, similar to how a seed checkpoint is handled.
 
 Once the conversion is complete, you can proceed with training using `flame` as usual, continuing from where the pretrained model left off.
 
 ## Multi-node training
 
-If you have access to multi-node GPUs, consider leveraging them for optimal performance. 
-This process is straightforward and well-documented in the PyTorch [docs](https://pytorch.org/docs/stable/elastic/run.html). 
+If you have access to multi-node GPUs, consider leveraging them for optimal performance.
+This process is straightforward and well-documented in the PyTorch [docs](https://pytorch.org/docs/stable/elastic/run.html).
 
 To set up multi-node training:
 * Set the environment variables `MASTER_ADDR=<ip>` and `MASTER_PORT=<port>` before running the training script across all nodes.
