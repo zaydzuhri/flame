@@ -37,3 +37,7 @@ Homepage = "https://github.com/fla-org/flame"
 [build-system]
 requires = ["setuptools>=45", "wheel", "ninja", "torch"]
 build-backend = "setuptools.build_meta"
+
+[tool.isort]
+line_length = 127
+multi_line_output = 3
