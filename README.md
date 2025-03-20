@@ -52,7 +52,7 @@ Here's an example of training a 340M FLA Transformer model with a LLaMA-like arc
 
 ```sh
 bash train.sh \
-  --job.config_file train.toml \
+  --job.config_file flame/models/fla.toml \
   --job.dump_folder exp/transformer-340M-4K-10B/batch1.seqlen65536.context4096.warmup1024.update1.steps20480.lr3e-4.cosine \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
@@ -92,11 +92,18 @@ By default, the learning rate is set to 3e-4 with a cosine scheduler. Other sche
 
 **Key parameters:**
 - `--lr_scheduler.decay_ratio`: The proportion of the steps allocated to the decay phase. The learning rate will remain stable after the warmup period and only start decaying during the last `decay_ratio` portion of the total training steps, which is known as the Warmup-Stable-Decay (WSD) schedule.
+- `--lr_scheduler.warmup_steps`: The number of steps for the learning rate warmup phase.
+- `--training.steps`: Total number of training steps.
 - `--training.batch_size`: Batch size per device, must be 1 if `--training.varlen` is set.
 - `--training.seq_len`: The length of each sequence in the batch, which is concatenated from multiple samples.
-- `--training.context_len`: The max allowed length of a sample.
-- `--training.varlen`: Whether to conduct variable-length sequence training..
+- `--training.context_len`: The max allowed length of a sample. For non-varlen mode, this is equivalent to `seq_len`.
+- `--training.varlen`: Whether to conduct variable-length sequence training.
 - `--training.gradient_accumulation_steps`: Number of gradient accumulation steps.
+
+> [!WARNING]
+> The total number of tokens processed per batch, referred to as `global_batch_size`, is calculated as batch_size × gradient_accumulation_steps × num_gpus.
+> Each step processes `global_batch_size * seq_len` tokens.  
+> Monitor the value of `global_batch_size`, `warmup_steps`, and `steps` carefully when modifying any of the hyperparameters!
 
 For a detailed explanation of all parameters, run:
 
@@ -435,7 +442,7 @@ Once training is complete, you may want to convert the distributed checkpoints (
 To facilitate this, we provide a straightforward conversion script:
 
 ```sh
-python convert_dcp_to_hf.py --path <path_to_model> --step <step> --config <path_to_config> --tokenizer <path_to_tokenizer>
+python -m flame.utils.convert_dcp_to_hf --path <path_to_model> --step <step> --config <path_to_config> --tokenizer <path_to_tokenizer>
 ```
 After this, your model will be in the 🤗 format, ready to be shared or deployed.
 You can then easily publish your model using the `huggingface_hub` for wider accessibility.
@@ -445,7 +452,7 @@ You can then easily publish your model using the `huggingface_hub` for wider acc
 If you wish to build upon a strong pre-trained model (in 🤗 format) and continue training, we also offer a script to convert the 🤗 format model back into DCP format.
 This allows you to seamlessly resume training with `flame`.
 ```sh
-python convert_hf_to_dcp.py --model <path_to_hf> --checkpoint <path_to_dcp/checkpoint/step-0>
+python -m flame.utils.convert_hf_to_dcp --model <path_to_hf> --checkpoint <path_to_dcp/checkpoint/step-0>
 ```
 Here, `<path_to_dcp>` is the directory where your distributed checkpoints will be stored.
 The checkpoint is intentionally saved at `<step-0>` within the checkpoint folder to ensure it is loadable by `flame` during the initial training step, similar to how a seed checkpoint is handled.
