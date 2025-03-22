@@ -83,15 +83,18 @@ cp -r 3rdparty/torchtitan/torchtitan $path
 if [ "$date" == "" ]; then
   date=$(date +%Y%m%d%H%M)
 fi
+RUN_NAME="$model-$(basename $path)"
+RUN_ID="$RUN_NAME-$date"
+
 export WANDB_RESUME=allow
 if [[ -z "${WANDB_PROJECT}" ]]; then
   export WANDB_PROJECT="fla"
 fi
 if [[ -z "${WANDB_NAME}" ]]; then
-  export WANDB_NAME="$model-$(basename $path)"
+  export WANDB_NAME="$RUN_NAME"
 fi
 if [[ -z "${WANDB_RUN_ID}" ]]; then
-  export WANDB_RUN_ID="$WANDB_NAME-$date"
+  export WANDB_RUN_ID="$RUN_ID"
 fi
 
 PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" \
@@ -102,6 +105,7 @@ torchrun --nnodes=${NNODE} \
   --local-ranks-filter ${LOG_RANK} \
   --role rank \
   --tee 3 \
+  --log-dir $path/logs \
   -m flame.train \
   $params
 

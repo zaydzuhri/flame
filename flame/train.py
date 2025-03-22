@@ -60,9 +60,6 @@ def main(job_config: JobConfig):
     if job_config.experimental.custom_model_path:
         utils.import_module_from_path(job_config.experimental.custom_model_path)
 
-    if job_config.job.print_args:
-        logger.info(f"Running with args: {job_config.to_dict()}")
-
     # used for colorful printing
     color = utils.NoColor if job_config.metrics.disable_color_printing else utils.Color
 
