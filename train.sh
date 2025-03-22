@@ -102,7 +102,7 @@ torchrun --nnodes=${NNODE} \
   --local-ranks-filter ${LOG_RANK} \
   --role rank \
   --tee 3 \
-  train.py \
+  -m flame.train \
   $params
 
 echo "TRAINING DONE!"
