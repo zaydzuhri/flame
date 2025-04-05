@@ -4,10 +4,18 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from torch import nn
 from torchtitan.tools.logging import logger
 
 
-def get_num_flop_per_token(num_params: int, model_config, seq_len) -> int:
+def get_nparams_and_flops(model: nn.Module, model_config, seq_len: int) -> tuple[int, int]:
+    nparams = sum(p.numel() for p in model.parameters())
+    nparams_embedding = sum(
+        sum(p.numel() for p in m.parameters())
+        for m in model.children()
+        if isinstance(m, nn.Embedding)
+    )
+    
     if hasattr(model_config, "num_heads"):
         num_heads = model_config.num_heads
     elif hasattr(model_config, "num_attention_heads"):
@@ -28,6 +36,6 @@ def get_num_flop_per_token(num_params: int, model_config, seq_len) -> int:
     #    but recomputation should not be counted in calculating MFU           (+0)
     # 3. each matmul performs 1 multiplication and 1 addition                 (*2)
     # 4. we follow the convention and do not account for sparsity in causal attention
-    flop_per_token = 6 * num_params + 12 * l * h * q * t
+    num_flops_per_token = 6 * (nparams - nparams_embedding) + 12 * l * h * q * t
 
-    return flop_per_token
+    return nparams, num_flops_per_token

@@ -22,12 +22,13 @@ from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
-from flame.tools.utils import get_num_flop_per_token
+from flame.tools.utils import get_nparams_and_flops
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
-from torchtitan.components.loss import cross_entropy_loss
-from torchtitan.components.metrics import _build_metric_logger, build_device_memory_monitor, ensure_pp_loss_visible
-from torchtitan.components.optimizer import build_lr_schedulers, build_optimizers
+from torchtitan.components.loss import build_cross_entropy_loss
+from torchtitan.components.lr_scheduler import build_lr_schedulers
+from torchtitan.components.metrics import build_device_memory_monitor, build_metrics_processor, ensure_pp_loss_visible
+from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
@@ -35,6 +36,11 @@ from torchtitan.protocols.train_spec import TrainSpec, get_train_spec, register_
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.tools.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+
+
+def build_tokenizer(job_config: JobConfig) -> AutoTokenizer:
+    return AutoTokenizer.from_pretrained(job_config.model.tokenizer_path)
+
 
 register_train_spec(
     TrainSpec(
@@ -46,8 +52,8 @@ register_train_spec(
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
         build_dataloader_fn=build_dataloader,
-        tokenizer_cls=AutoTokenizer,
-        loss_fn=cross_entropy_loss,
+        build_tokenizer_fn=build_tokenizer,
+        build_loss_fn=build_cross_entropy_loss,
     )
 )
 
@@ -203,9 +209,9 @@ def main(job_config: JobConfig):
             dataset_names = [
                 name or None for name in job_config.training.dataset_name.split(",")
             ]
-            assert len(dataset_names) == len(
-                datasets
-            ), "The number of dataset names must match the number of datasets"
+            assert len(dataset_names) == len(datasets), (
+                "The number of dataset names must match the number of datasets"
+            )
         else:
             dataset_names = [None] * len(datasets)
         if job_config.training.dataset_split is not None:
@@ -213,32 +219,32 @@ def main(job_config: JobConfig):
                 split or "train"
                 for split in job_config.training.dataset_split.split(",")
             ]
-            assert len(dataset_splits) == len(
-                datasets
-            ), "The number of dataset splits must match the number of datasets"
+            assert len(dataset_splits) == len(datasets), (
+                "The number of dataset splits must match the number of datasets"
+            )
         else:
             dataset_splits = ["train"] * len(datasets)
         if job_config.training.data_dir is not None:
             data_dirs = [
                 data_dir or None for data_dir in job_config.training.data_dir.split(",")
             ]
-            assert len(data_dirs) == len(
-                datasets
-            ), "The number of data dirs must match the number of datasets"
+            assert len(data_dirs) == len(datasets), (
+                "The number of data dirs must match the number of datasets"
+            )
         else:
             data_dirs = [None] * len(datasets)
         if job_config.training.data_files is not None:
             data_files = job_config.training.data_files.split(",")
-            assert len(data_files) == len(
-                datasets
-            ), "The number of data files must match the number of datasets"
+            assert len(data_files) == len(datasets), (
+                "The number of data files must match the number of datasets"
+            )
         else:
             data_files = [None] * len(datasets)
         if job_config.training.data_probs is not None:
             data_probs = [float(p) for p in job_config.training.data_probs.split(",")]
-            assert len(data_probs) == len(
-                datasets
-            ), "The number of data probabilities must match the number of datasets"
+            assert len(data_probs) == len(datasets), (
+                "The number of data probabilities must match the number of datasets"
+            )
         else:
             raise ValueError(
                 "Data sampling probabilities are required if using multiple datasets"
@@ -390,12 +396,9 @@ def main(job_config: JobConfig):
     model_converters = build_model_converters(job_config, parallel_dims)
     model_converters.convert(model)
 
-    # log model size
-    model_param_count = utils.get_num_params(model)
-    num_flop_per_token = get_num_flop_per_token(
-        utils.get_num_params(model, exclude_embedding=True),
-        model_config,
-        job_config.training.context_len,
+    # calculate model size and flops per token
+    model_param_count, num_flops_per_token = get_nparams_and_flops(
+        model, model_config, job_config.training.context_len
     )
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
@@ -408,7 +411,6 @@ def main(job_config: JobConfig):
 
     # apply parallelisms and initialization
     if parallel_dims.pp_enabled:
-
         # apply PT-D Pipeline Parallel
         (
             pp_schedule,
@@ -481,29 +483,35 @@ def main(job_config: JobConfig):
     )
 
     if job_config.checkpoint.create_seed_checkpoint:
-        assert (
-            world_size == 1
-        ), "Must create seed checkpoint using a single device, to disable sharding"
-        assert (
-            job_config.checkpoint.enable_checkpoint
-        ), "Must enable checkpointing when creating a seed checkpoint"
+        assert world_size == 1, (
+            "Must create seed checkpoint using a single device, to disable sharding"
+        )
+        assert job_config.checkpoint.enable_checkpoint, (
+            "Must enable checkpointing when creating a seed checkpoint"
+        )
         checkpoint.save(curr_step=0, force=True)
         logger.info("Created seed checkpoint")
         return
 
     checkpoint.load(step=job_config.checkpoint.load_step)
-    metric_logger = _build_metric_logger(job_config, parallel_dims)
+    metric_logger = build_metrics_processor(job_config, parallel_dims)
+    # Set dependent attributes for metric_logger
+    metric_logger.num_flops_per_token = num_flops_per_token
+    metric_logger.optimizers = optimizers  # Pass optimizers if needed by logger logic
+    metric_logger.lr_schedulers = (
+        lr_schedulers  # Pass schedulers if needed by logger logic
+    )
 
     # plot losses loaded from checkpoint (if any) to TensorBoard
     # NOTE: Loss info after the last log step before checkpoint saving will not be ploted.
     #       This can be avoided by setting checkpoint.interval to be a multiple of metrics.log_freq
-    if train_state.step > 0:
+    if train_state.step > 0 and len(metric_logger.data_loading_times) > 0:
         for idx, step in enumerate(train_state.log_steps):
-            metrics = {
-                "optim/global_avg_loss": train_state.global_avg_losses[idx],
-                "optim/global_max_loss": train_state.global_max_losses[idx],
-            }
-            metric_logger.log(metrics, step=step)
+            metric_logger.log(
+                step,
+                global_avg_loss=train_state.global_avg_losses[idx],
+                global_max_loss=train_state.global_max_losses[idx],
+            )
 
     data_iterator = iter(dataloader)
 
@@ -513,9 +521,6 @@ def main(job_config: JobConfig):
     )
 
     # variables used to keep info for metrics logging
-    ntokens_since_last_log = 0
-    data_loading_times = []
-    time_last_log = time.perf_counter()
     device_memory_monitor.reset_peak_stats()
 
     global_batch_size = (
@@ -574,8 +579,13 @@ def main(job_config: JobConfig):
                 batch = next(data_iterator)
                 input_ids, labels = batch["input_ids"], batch["labels"]
 
-                ntokens_since_last_log += labels.numel()
-                data_loading_times.append(time.perf_counter() - data_load_start)
+                # Update metrics processor state before forward/backward
+                metric_logger.ntokens_since_last_log += (
+                    labels.numel() * job_config.training.gradient_accumulation_steps
+                )
+                metric_logger.data_loading_times.append(
+                    time.perf_counter() - data_load_start
+                )
 
                 input_ids = input_ids.to(device_type)
 
@@ -682,106 +692,48 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
-            # log metrics
-            if (
-                train_state.step == 1
-                or train_state.step % job_config.metrics.log_freq == 0
-            ):
+            # log metrics - Use MetricsProcessor
+            if metric_logger.should_log(train_state.step):
                 if (
                     parallel_dims.dp_replicate_enabled
                     or parallel_dims.dp_shard_enabled
                     or parallel_dims.cp_enabled
                 ):
                     loss = loss.detach()
+                    # Use dist_mean/max on the accumulated loss for the step
                     global_avg_loss, global_max_loss = (
-                        dist_utils.dist_mean(loss, world_mesh["dp_cp"]),
-                        dist_utils.dist_max(loss, world_mesh["dp_cp"]),
+                        dist_utils.dist_mean(
+                            loss * job_config.training.gradient_accumulation_steps,
+                            world_mesh["dp_cp"],
+                        ),
+                        dist_utils.dist_max(
+                            loss * job_config.training.gradient_accumulation_steps,
+                            world_mesh["dp_cp"],
+                        ),
                     )
                 else:
-                    global_avg_loss = global_max_loss = loss.item()
+                    # Scale back the loss before logging
+                    global_avg_loss = global_max_loss = (
+                        loss.item() * job_config.training.gradient_accumulation_steps
+                    )
 
-                time_delta = time.perf_counter() - time_last_log
-
-                """
-                TODO[flame]: check this after fixing TP/PP/CP, if we assume all ranks have the same number of tokens
-                we can just multiple it by DP's dims, this avoiding to deal with the case taht dp does nto exists
-                """
-                # update train state
-                # train_state.token += (
-                #     utils.dist_reduce(
-                #         torch.tensor(ntokens_since_last_log, device=device),
-                #         "sum",
-                #         world_mesh["dp_cp"],
-                #     )
-                #     / parallel_dims.non_data_parallel_size
-                # )
-                # update train state
+                # Update train state tokens and elapsed time
+                time_now = time.perf_counter()
+                time_delta = (
+                    time_now - metric_logger.time_last_log
+                )  # Use metric_logger's time
                 train_state.token += (
-                    ntokens_since_last_log
+                    metric_logger.ntokens_since_last_log  # Use tokens tracked by metric_logger
                     * parallel_dims.world_size
                     / parallel_dims.non_data_parallel_size
                 )
-
                 train_state.elapsed += timedelta(seconds=time_delta)
                 train_state.log_steps.append(train_state.step)
                 train_state.global_avg_losses.append(global_avg_loss)
                 train_state.global_max_losses.append(global_max_loss)
 
-                last_lr = lr_schedulers.schedulers[0].get_last_lr()[0]
-                # tokens per second per device, abbreviated as tgs
-                tgs = ntokens_since_last_log / (
-                    time_delta * parallel_dims.non_data_parallel_size
-                )
-                # model FLOPS utilization
-                # For its definition and calculation, please refer to the PaLM paper:
-                # httgs://arxiv.org/abs/2204.02311
-                mfu = num_flop_per_token * tgs / gpu_peak_flops
-
-                time_end_to_end = time_delta / job_config.metrics.log_freq
-                time_data_loading = sum(data_loading_times) / len(data_loading_times)
-                time_data_loading_pct = 100 * sum(data_loading_times) / time_delta
-
-                eta = (
-                    train_state.elapsed
-                    * (job_config.training.steps - train_state.step)
-                    / train_state.step
-                )
-
-                device_mem_stats = device_memory_monitor.get_peak_stats()
-
-                metrics = {
-                    "optim/global_avg_loss": global_avg_loss,
-                    "optim/global_max_loss": global_max_loss,
-                    "optim/learning_rate": last_lr,
-                    "optim/grad_norm": grad_norm,
-                    "optim/skipped": train_state.skipped_step,
-                    "speed/throughput(tgs)": tgs,
-                    "speed/mfu(%)": mfu,
-                    "time/end_to_end(s)": time_end_to_end,
-                    "time/data_loading(s)": time_data_loading,
-                    "time/data_loading(%)": time_data_loading_pct,
-                    "memory/max_active(GiB)": device_mem_stats.max_active_gib,
-                    "memory/max_active(%)": device_mem_stats.max_active_pct,
-                    "memory/max_reserved(GiB)": device_mem_stats.max_reserved_gib,
-                    "memory/max_reserved(%)": device_mem_stats.max_reserved_pct,
-                    "memory/num_alloc_retries": device_mem_stats.num_alloc_retries,
-                    "memory/num_ooms": device_mem_stats.num_ooms,
-                }
-                metric_logger.log(metrics, step=train_state.step)
-
-                logger.info(
-                    f"{color.cyan}step: {train_state.step:>8,} token: {train_state.token:>15,}  "
-                    f"{color.green}loss: {global_avg_loss:7.4f}  "
-                    f"{color.blue}lr: {last_lr:.4e} gnorm: {grad_norm:5.2f} "
-                    f"{color.yellow}memory: {device_mem_stats.max_reserved_gib:5.2f}GiB "
-                    f"{color.red}tgs: {round(tgs):7,} mfu: {mfu:6.2%} "
-                    f"{color.magenta}[{str(train_state.elapsed).split('.')[0]:>8}<{str(eta).split('.')[0]:>8}]{color.reset}"
-                )
-
-                ntokens_since_last_log = 0
-                data_loading_times.clear()
-                time_last_log = time.perf_counter()
-                device_memory_monitor.reset_peak_stats()
+                # Log using the metric processor
+                metric_logger.log(train_state.step, global_avg_loss, global_max_loss)
 
             checkpoint.save(
                 train_state.step, force=(train_state.step == job_config.training.steps)
