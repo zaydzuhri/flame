@@ -23,6 +23,10 @@ from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_nparams_and_flops
+from flame.utils.checkpoint import cleanup_local_checkpoints
+from flame.utils.convert_dcp_to_hf import save_pretrained
+from flame.utils.hf_utils import upload_checkpoint_to_hf
+from datetime import datetime
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import build_cross_entropy_loss
@@ -82,6 +86,19 @@ def main(job_config: JobConfig):
     # Device has to be set before creating TorchFT manager.
     device_module.set_device(device)
     ft_manager = init_ft_manager(job_config)
+
+    run_specific_repo_id = None
+    if getattr(job_config.checkpoint, "hf_upload_enabled", False):
+        hf_repo_base = getattr(job_config.checkpoint, "hf_repo_base_name", None)
+        if hf_repo_base:
+            # Generate timestamp (adjust format if desired)
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            run_specific_repo_id = f"{hf_repo_base}-{timestamp}"
+            logger.info(f"Target Hugging Face repository for this run: {run_specific_repo_id}")
+        else:
+            logger.warning("HF Hub upload enabled, but 'checkpoint.hf_repo_base_name' is not set.")
+            # Disable upload if base name is missing
+            job_config.checkpoint.hf_upload_enabled = False
 
     # init distributed
     world_size = int(os.environ["WORLD_SIZE"])
@@ -754,6 +771,55 @@ def main(job_config: JobConfig):
             checkpoint.save(
                 train_state.step, force=(train_state.step == job_config.training.steps)
             )
+            
+            if job_config.checkpoint.enable_checkpoint:
+                # --- Optional Conversion ---
+                hf_target_path = None # Keep track of HF path if converted
+                dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") # Construct DCP path manually
+
+                if getattr(job_config.checkpoint, "convert_to_hf_on_save", False):
+                    try:
+                        # Get the path where DCP was just saved
+                        # Check CheckpointManager API for the best way, assuming get_save_path exists
+                        hf_target_path = f"{dcp_save_path}" # e.g., .../checkpoint/step-1000-hf
+
+                        logger.info(f"Converting step {train_state.step} DCP checkpoint to HF format at: {hf_target_path}")
+                        save_pretrained( # Call the imported function
+                            path=hf_target_path, # Pass target HF path as 'path'
+                            step=train_state.step,
+                            config=job_config.model.config, # Pass model config path/id
+                            tokenizer=job_config.model.tokenizer_path # Pass tokenizer path/id
+                        )
+                        logger.info(f"Successfully converted step {train_state.step} to HF format.")
+
+                    except Exception as e:
+                        logger.error(f"Failed to convert checkpoint step {train_state.step} to HF format: {e}", exc_info=True)
+
+                base_checkpoint_dir = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder)
+                if getattr(job_config.checkpoint, "hf_upload_enabled", True):
+                    upload_format = getattr(job_config.checkpoint, "hf_upload_format", "hf")
+                    keep_k_hub = getattr(job_config.checkpoint, "hf_keep_latest_k", 5)
+
+                    local_path_to_upload = None
+                    if upload_format == "hf":
+                        if hf_target_path and os.path.isdir(hf_target_path):
+                            local_path_to_upload = hf_target_path
+                    elif upload_format == "dcp":
+                        if dcp_save_path and os.path.isdir(dcp_save_path):
+                            local_path_to_upload = dcp_save_path
+
+                    if local_path_to_upload:
+                        try:
+                            upload_checkpoint_to_hf(
+                                local_path=os.path.join(job_config.job.dump_folder, "checkpoint"),
+                                step=train_state.step,
+                                hf_keep_latest_k=job_config.checkpoint.keep_latest_k,
+                                hf_repo_id_for_run=run_specific_repo_id,
+                                upload_format=upload_format
+                            )                               
+                        except Exception as e:
+                            logger.error(f"Failed during HF Hub upload for step {train_state.step}: {e}", exc_info=True)
+                
 
             # signal the profiler that the next profiling step has started
             if torch_profiler:
