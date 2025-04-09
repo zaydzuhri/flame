@@ -774,10 +774,10 @@ def main(job_config: JobConfig):
             
             if torch.distributed.get_rank() == 0:
                 if job_config.checkpoint.enable_checkpoint:
-                    # --- Optional Conversion ---
-                    hf_target_path = None # Keep track of HF path if converted
-                    dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") # Construct DCP path manually
+                    hf_target_path = None
+                    dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") 
 
+                    # TODO: Haven't tested this one yet
                     if getattr(job_config.checkpoint, "convert_to_hf_on_save", False):
                         try:
                             # Get the path where DCP was just saved
@@ -812,11 +812,11 @@ def main(job_config: JobConfig):
                         if local_path_to_upload:
                             try:
                                 upload_checkpoint_to_hf(
-                                    local_path=os.path.join(job_config.job.dump_folder, "checkpoint"),
+                                    local_path=local_path_to_upload,
                                     step=train_state.step,
-                                    hf_keep_latest_k=job_config.checkpoint.keep_latest_k,
                                     hf_repo_id_for_run=run_specific_repo_id,
-                                    upload_format=upload_format
+                                    upload_format=upload_format,
+                                    hf_keep_latest_k=job_config.checkpoint.keep_latest_k,
                                 )                               
                             except Exception as e:
                                 logger.error(f"Failed during HF Hub upload for step {train_state.step}: {e}", exc_info=True)
