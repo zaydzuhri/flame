@@ -729,7 +729,27 @@ def main(job_config: JobConfig):
                 train_state.global_max_losses.append(global_max_loss)
 
                 # Log using the metric processor
-                metric_logger.log(train_state.step, global_avg_loss, global_max_loss)
+                last_lr = lr_schedulers.schedulers[0].get_last_lr()[0]
+                eta = (
+                    train_state.elapsed
+                    * (job_config.training.steps - train_state.step)
+                    / train_state.step
+                )
+                metric_logger.log(
+                    train_state.step,
+                    global_avg_loss,
+                    global_max_loss,
+                    extra_metrics={
+                        "optimizer/lr": last_lr,
+                        "optimizer/grad_norm": grad_norm.item(),
+                        "optimizer/skipped_step": train_state.skipped_step,
+                    },
+                )
+
+                logger.info(
+                    f"{color.blue}lr: {last_lr:.4e} gnorm: {grad_norm:5.2f} "
+                    f"{color.magenta}[{str(train_state.elapsed).split('.')[0]:>8}<{str(eta).split('.')[0]:>8}]{color.reset}"
+                )
 
             checkpoint.save(
                 train_state.step, force=(train_state.step == job_config.training.steps)
