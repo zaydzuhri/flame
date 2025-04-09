@@ -774,9 +774,8 @@ def main(job_config: JobConfig):
             
             if torch.distributed.get_rank() == 0:
                 if job_config.checkpoint.enable_checkpoint:
-                    # --- Optional Conversion ---
-                    hf_target_path = None # Keep track of HF path if converted
-                    dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") # Construct DCP path manually
+                    hf_target_path = None
+                    dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") 
 
                     # TODO: Haven't tested this one yet
                     if getattr(job_config.checkpoint, "convert_to_hf_on_save", False):
@@ -813,7 +812,7 @@ def main(job_config: JobConfig):
                         if local_path_to_upload:
                             try:
                                 upload_checkpoint_to_hf(
-                                    local_path=os.path.join(job_config.job.dump_folder, "checkpoint"),
+                                    local_path=local_path_to_upload,
                                     step=train_state.step,
                                     hf_repo_id_for_run=run_specific_repo_id,
                                     upload_format=upload_format,
