@@ -8,9 +8,9 @@ from torchtitan.tools.logging import logger
 def upload_checkpoint_to_hf(
     local_path: str,
     step: int,
-    hf_keep_latest_k: int,
     hf_repo_id_for_run: str,
-    upload_format: str
+    upload_format: str,
+    hf_keep_latest_k: int=0,
 ):
     """
     Uploads a checkpoint directory to a specific HF Hub repository
@@ -37,6 +37,24 @@ def upload_checkpoint_to_hf(
         logger.error(f"Failed to create or ensure repository {hf_repo_id_for_run}: {e}", exc_info=True)
         return # Stop if repo interaction fails
 
+
+    # --- Upload to a step-{step} folder within the run-specific repository ---
+    commit_message = f"Upload {upload_format.upper()} checkpoint step {step}"
+
+    logger.info(f"Uploading {local_path} to {hf_repo_id_for_run}/ on Hugging Face Hub...")
+    try:
+        api.upload_folder(
+            folder_path=local_path,
+            repo_id=hf_repo_id_for_run,
+            repo_type="model",
+            commit_message=commit_message,
+            token=token,
+            run_as_future=False, 
+        )
+        logger.info(f"Successfully uploaded step {step} to {hf_repo_id_for_run}.")
+    except Exception as e:
+        logger.error(f"Failed to upload checkpoint step {step} to {hf_repo_id_for_run}: {e}", exc_info=True)
+
     # Check First Amount of Checkpoints
     repo_files = api.list_repo_tree(hf_repo_id_for_run, repo_type="model", token=token)
     step_folders = [
@@ -45,8 +63,9 @@ def upload_checkpoint_to_hf(
     ]
     step_folders.sort(key=lambda x: int(x.split('-')[1]), reverse=True)
 
-    if len(step_folders) >= hf_keep_latest_k:
+    if hf_keep_latest_k > 0 and len(step_folders) >= hf_keep_latest_k:
         folders_to_delete = step_folders[hf_keep_latest_k:]
+        print(f"{folders_to_delete = }")
         logger.info(f"Found {len(step_folders)} step folders in {hf_repo_id_for_run}. Deleting {len(folders_to_delete)} older ones: {folders_to_delete}")
         for folder in folders_to_delete:
             api.delete_folder(
@@ -57,23 +76,3 @@ def upload_checkpoint_to_hf(
                 token=token
             )
         logger.info("Hub folder cleanup complete.")
-
-
-    # --- Upload to a step-{step} folder within the run-specific repository ---
-    path_in_repo = f"step-{step}" # Upload into a folder named after the step
-    commit_message = f"Upload {upload_format.upper()} checkpoint step {step}"
-
-    logger.info(f"Uploading {local_path} to {hf_repo_id_for_run}/{path_in_repo} on Hugging Face Hub...")
-    try:
-        api.upload_folder(
-            folder_path=local_path,
-            path_in_repo=path_in_repo, # Target the step folder
-            repo_id=hf_repo_id_for_run,
-            repo_type="model",
-            commit_message=commit_message,
-            token=token,
-            run_as_future=False, 
-        )
-        logger.info(f"Successfully uploaded step {step} to {hf_repo_id_for_run}.")
-    except Exception as e:
-        logger.error(f"Failed to upload checkpoint step {step} to {hf_repo_id_for_run}: {e}", exc_info=True)
