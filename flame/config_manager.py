@@ -691,6 +691,35 @@ class JobConfig:
                 This will load the model only, excluding the specified keys.
             """,
         )
+        self.parser.add_argument(
+            "--checkpoint.convert_to_hf_on_save",
+            action="store_true",
+            help="""
+                If true, automatically convert the saved DCP checkpoint to Hugging Face format
+                in a parallel directory (e.g., step-1000-hf) after each save.
+            """,
+        )
+        self.parser.add_argument(
+            "--checkpoint.hf_upload_enabled",
+            action="store_true",
+            help="Enable uploading converted Hugging Face checkpoints to the Hub.",
+        )
+        self.parser.add_argument(
+            "--checkpoint.hf_repo_base_name",
+            type=str,
+            default=None,
+            help="Hugging Face Hub repository ID to upload checkpoints to (e.g., 'username/repo').",
+        )
+        self.parser.add_argument(
+            "--checkpoint.hf_upload_format",
+            type=str,
+            default="dcp",
+            choices=["dcp", "hf"],
+            help="""
+                Format to upload to Hugging Face Hub. 'dcp' for DCP format, 'hf' for Hugging Face format.
+                Note: 'hf' is only supported for models with a single pipeline stage.
+            """,
+        )
         # activation checkpointing configs
         self.parser.add_argument(
             "--activation_checkpoint.mode",
