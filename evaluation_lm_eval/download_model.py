@@ -16,14 +16,15 @@ def download_dcp_model(repo_id: str, folder_in_repo: str):
     dcp_folder = os.path.join(
         current_dir,
         "evaluation_lm_eval", 
-        "dcp", 
-        repo_name
+        "models", 
+        repo_name,
+        "checkpoint"
     )
     os.makedirs(dcp_folder, exist_ok=True)
 
-    # check if the folder has already been downloaded
-    if os.path.exists(dcp_folder):
-        print(f"Folder {dcp_folder} already exists. Skipping download.")
+    # check if the content of the folder has already been downloaded
+    if os.path.exists(os.path.join(dcp_folder, folder_in_repo)):
+        print(f"The content of {folder_in_repo} has already been downloaded.")
         return
 
     snapshot_download(
@@ -69,13 +70,18 @@ def main():
     dcp_folder = os.path.join(
         current_dir,
         "evaluation_lm_eval",
-        "dcp",
-        args.repo_id.split("/")[-1]
+        "models",
+        args.repo_id.split("/")[-1],
+        "."
     )
+
+    breakpoint()
+
+    step = int(args.folder_in_repo.split("-")[-1])
 
     convert_dcp_to_hf.save_pretrained(
         path=dcp_folder,
-        step=0,
+        step=step,
         config=args.config_path,
         tokenizer=args.tokenizer_path,
     )
