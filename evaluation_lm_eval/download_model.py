@@ -75,8 +75,6 @@ def main():
         "."
     )
 
-    breakpoint()
-
     step = int(args.folder_in_repo.split("-")[-1])
 
     convert_dcp_to_hf.save_pretrained(
