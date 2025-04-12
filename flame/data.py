@@ -40,12 +40,12 @@ class BufferShuffledIterableDataset(IterableDataset):
         self.world_size = world_size
         self.buffer_size = buffer_size
 
-        if tokenizer.vocab_size < torch.iinfo(torch.int16).max:
-            self.dtype = torch.int16
-        elif tokenizer.vocab_size < torch.iinfo(torch.int32).max:
-            self.dtype = torch.int32
+        if tokenizer.vocab_size < torch.iinfo(torch.uint16).max:
+            self.dtype = torch.uint16
+        elif tokenizer.vocab_size < torch.iinfo(torch.uint32).max:
+            self.dtype = torch.uint32
         else:
-            self.dtype = torch.int64
+            self.dtype = torch.uint64
         self.states = None
         self.buffer = torch.tensor([], dtype=self.dtype)
         self.tokens = []
