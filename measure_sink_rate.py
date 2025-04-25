@@ -20,30 +20,36 @@ def calculate_sink_rate(attention_maps, epsilon=0.3):
     - epsilon is the threshold (default: 0.3)
     
     Args:
-        attention_maps: Attention maps from the model with shape [batch, layers, heads, seq_len, seq_len]
+        attention_maps: Attention maps from the model as a list with length L of tensors with shape [batch, heads, seq_len, seq_len]
         epsilon: Threshold for attention
         
     Returns:
         sink_rate: The calculated sink rate
     """
-    # Extract attention on first token (BOS) across all layers and heads
-    first_token_attention = attention_maps[:, :, :, :, 0]  # [batch, layers, heads, seq_len]
-    # print("first token attentions", first_token_attention)
-    
-    # Calculate mean attention on first token across sequence length
-    mean_first_token_attention = first_token_attention.mean(dim=-1)  # [batch, layers, heads]
-    # print("mean first token attentions", mean_first_token_attention)
-    
-    # Apply indicator function - whether mean attention > epsilon
-    indicator = (mean_first_token_attention > epsilon).float()  # [batch, layers, heads]
-    # print("indicator", indicator)
-    
-    # Average across layers and heads
-    batch_sink_rates = indicator.mean(dim=(1, 2))  # [batch]
-    
-    # Average across batch
-    sink_rate = batch_sink_rates.mean().item()
-    
+    sink_rate = 0
+    for i, attention in enumerate(attention_maps):
+        # Extract attention on first token (BOS) across all heads
+        first_token_attention = attention[:, :, :, 0]  # [batch, heads, seq_len]
+        # print("first token attentions", first_token_attention)
+        
+        # Calculate mean attention on first token across sequence length
+        mean_first_token_attention = first_token_attention.mean(dim=-1)  # [batch, heads]
+        # print("mean first token attentions", mean_first_token_attention)
+        
+        # Apply indicator function - whether mean attention > epsilon
+        indicator = (mean_first_token_attention > epsilon).float()  # [batch, heads]
+        # print("indicator", indicator)
+        
+        # Average across heads
+        batch_sink_rates = indicator.mean(dim=(1))  # [batch]
+        
+        # Average across batch
+        sink_rate += batch_sink_rates.mean().item()
+
+    # Normalize by number of layers
+    num_layers = len(attention_maps)
+    sink_rate /= num_layers
+        
     return sink_rate
 
 def main(args):
@@ -93,10 +99,8 @@ def main(args):
         with torch.no_grad():
             outputs = model(**encodings)
         
-        # Get attention maps
-        attention_maps = torch.stack(outputs.attentions, dim=1)  # [batch, layers, heads, seq_len, seq_len]
         # Calculate sink rate for this batch
-        batch_sink_rate = calculate_sink_rate(attention_maps, args.epsilon)
+        batch_sink_rate = calculate_sink_rate(outputs.attentions, args.epsilon)
         attention_maps = None  # Free memory
         sink_rate += batch_sink_rate
     
