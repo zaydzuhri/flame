@@ -543,7 +543,7 @@ class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
 
 
 def build_dataset(
-    dataset: IterableDataset,
+    dataset: str,
     dataset_name: str = None,
     dataset_split: str = 'train',
     data_dir: str = None,
@@ -552,7 +552,7 @@ def build_dataset(
     streaming: bool = False,
     dp_degree: Optional[int] = None,
     num_workers: int = 32,
-    seed: int = 42,
+    seed: Optional[int] = None,
 ) -> IterableDataset:
     color = utils.Color
     min_num_shards = dp_degree * num_workers if dp_degree else None
@@ -565,18 +565,15 @@ def build_dataset(
             data_files=data_files,
             trust_remote_code=True,
             streaming=streaming,
-            num_proc=(
-                num_workers
-                if not streaming
-                else None
-            ),
+            num_proc=num_workers if not streaming else None,
         )
-
         logger.info(f"Shuffling the dataset with seed {seed}")
         if not streaming:
             # the states of map-style dataset is recoverable after shuffling
-            dataset = dataset.shuffle(seed=seed)
-            dataset = dataset.to_iterable_dataset(num_shards=min_num_shards or dataset.num_shards)
+            if seed is not None:
+                dataset = dataset.shuffle(seed=seed)
+            if min_num_shards is not None:
+                dataset = dataset.to_iterable_dataset(num_shards=min_num_shards)
         else:
             if min_num_shards is not None and dataset.num_shards < min_num_shards:
                 logger.warning(
@@ -597,10 +594,12 @@ def build_dataset(
                     streaming=False,
                     num_proc=num_workers,
                 )
-                dataset = dataset.shuffle(seed=seed)
+                if seed is not None:
+                    dataset = dataset.shuffle(seed=seed)
                 dataset = dataset.to_iterable_dataset(num_shards=min_num_shards)
             else:
-                dataset = shuffle(dataset, seed=seed)
+                if seed is not None:
+                    dataset = shuffle(dataset, seed=seed)
     else:
         datasets = dataset.split(",")
         if dataset_name is not None:
@@ -671,8 +670,10 @@ def build_dataset(
             logger.info(f"Shuffling the dataset with seed {seed}")
             if not streaming:
                 # the states of map-style dataset is recoverable after shuffling
-                subset = subset.shuffle(seed=seed)
-                subset = subset.to_iterable_dataset(num_shards=min_num_shards or subset.num_shards)
+                if seed is not None:
+                    subset = subset.shuffle(seed=seed)
+                if min_num_shards is not None:
+                    subset = subset.to_iterable_dataset(num_shards=min_num_shards)
             else:
                 if min_num_shards is not None and subset.num_shards < min_num_shards:
                     logger.warning(
@@ -695,15 +696,13 @@ def build_dataset(
                         streaming=False,
                         num_proc=num_workers,
                     )
-                    subset = subset.shuffle(seed=seed)
-                    subset = subset.to_iterable_dataset(num_shards=min_num_shards or subset.num_shards)
+                    if seed is not None:
+                        subset = subset.shuffle(seed=seed)
+                    subset = subset.to_iterable_dataset(num_shards=min_num_shards)
                 else:
                     # we set relatively small buffer size here as interleaving could provide some randomness
-                    subset = shuffle(
-                        subset,
-                        seed=seed,
-                        buffer_size=max(128, 1024 // len(datasets)),
-                    )
+                    if seed is not None:
+                        subset = shuffle(subset, seed=seed, buffer_size=max(128, 1024 // len(datasets)))
 
             if "text" in subset.column_names:
                 subset = subset.select_columns("text")
