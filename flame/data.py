@@ -11,12 +11,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 import datasets
 import numpy as np
 import torch
-from datasets import Dataset, IterableDataset
+from datasets import Dataset, IterableDataset, interleave_datasets, load_dataset
 from datasets.iterable_dataset import ShufflingConfig
 from torch.distributed.checkpoint.stateful import Stateful
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer
 
+from torchtitan.tools import utils
 from torchtitan.tools.logging import logger
 
 
@@ -539,6 +540,192 @@ class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
             logger.warning(f'DataLoader state is empty for dp rank {self.rank}, expected key rank_{self.rank}')
             return
         super().load_state_dict(pickle.loads(state_dict[f'rank_{self.rank}']))
+
+
+def build_dataset(
+    dataset: IterableDataset,
+    dataset_name: str = None,
+    dataset_split: str = 'train',
+    data_dir: str = None,
+    data_files: str = None,
+    data_probs: List[float] = None,
+    streaming: bool = False,
+    dp_degree: Optional[int] = None,
+    num_workers: int = 32,
+    seed: int = 42,
+) -> IterableDataset:
+    color = utils.Color
+    min_num_shards = dp_degree * num_workers if dp_degree else None
+    if len(dataset.split(',')) == 1:
+        dataset = load_dataset(
+            path=dataset,
+            name=dataset_name,
+            split=dataset_split,
+            data_dir=data_dir,
+            data_files=data_files,
+            trust_remote_code=True,
+            streaming=streaming,
+            num_proc=(
+                num_workers
+                if not streaming
+                else None
+            ),
+        )
+
+        logger.info(f"Shuffling the dataset with seed {seed}")
+        if not streaming:
+            # the states of map-style dataset is recoverable after shuffling
+            dataset = dataset.shuffle(seed=seed)
+            dataset = dataset.to_iterable_dataset(num_shards=min_num_shards or dataset.num_shards)
+        else:
+            if min_num_shards is not None and dataset.num_shards < min_num_shards:
+                logger.warning(
+                    f"{color.red}"
+                    f"Dataset {dataset} has insufficient shards ({dataset.num_shards}). "
+                    f"Need {min_num_shards} shards minimum for {dp_degree} data parallel workers × "
+                    f"{num_workers} dataloader workers. "
+                    f"Disabling the streaming mode and resharding dataset to {min_num_shards} shards."
+                    f"{color.reset}"
+                )
+                dataset = load_dataset(
+                    path=dataset,
+                    name=dataset_name,
+                    split=dataset_split,
+                    data_dir=data_dir,
+                    data_files=data_files,
+                    trust_remote_code=True,
+                    streaming=False,
+                    num_proc=num_workers,
+                )
+                dataset = dataset.shuffle(seed=seed)
+                dataset = dataset.to_iterable_dataset(num_shards=min_num_shards)
+            else:
+                dataset = shuffle(dataset, seed=seed)
+    else:
+        datasets = dataset.split(",")
+        if dataset_name is not None:
+            dataset_names = [
+                name or None for name in dataset_name.split(",")
+            ]
+            assert len(dataset_names) == len(datasets), (
+                "The number of dataset names must match the number of datasets"
+            )
+        else:
+            dataset_names = [None] * len(datasets)
+        if dataset_split is not None:
+            dataset_splits = [split or "train"for split in dataset_split.split(",")]
+            assert len(dataset_splits) == len(datasets), (
+                "The number of dataset splits must match the number of datasets"
+            )
+        else:
+            dataset_splits = ["train"] * len(datasets)
+        if data_dir is not None:
+            data_dirs = [
+                data_dir or None for data_dir in data_dir.split(",")
+            ]
+            assert len(data_dirs) == len(datasets), (
+                "The number of data dirs must match the number of datasets"
+            )
+        else:
+            data_dirs = [None] * len(datasets)
+        if data_files is not None:
+            data_files = data_files.split(",")
+            assert len(data_files) == len(datasets), (
+                "The number of data files must match the number of datasets"
+            )
+        else:
+            data_files = [None] * len(datasets)
+        if data_probs is not None:
+            data_probs = [float(p) for p in data_probs.split(",")]
+            assert len(data_probs) == len(datasets), (
+                "The number of data probabilities must match the number of datasets"
+            )
+        else:
+            raise ValueError(
+                "Data sampling probabilities are required if using multiple datasets"
+            )
+
+        subsets = []
+        for i, prob in enumerate(data_probs):
+            subset = load_dataset(
+                path=datasets[i],
+                name=dataset_names[i],
+                split=dataset_splits[i],
+                data_dir=data_dirs[i],
+                data_files=data_files[i],
+                trust_remote_code=True,
+                streaming=streaming,
+                num_proc=(
+                    num_workers
+                    if not streaming
+                    else None
+                ),
+            )
+            logger.info(
+                f"Subset {color.cyan}{datasets[i]}"
+                + (f":{dataset_names[i]} " if dataset_names[i] else " ")
+                + f"(p = {prob:.3f}){color.reset}:\n"
+                + f"{subset}"
+            )
+
+            logger.info(f"Shuffling the dataset with seed {seed}")
+            if not streaming:
+                # the states of map-style dataset is recoverable after shuffling
+                subset = subset.shuffle(seed=seed)
+                subset = subset.to_iterable_dataset(num_shards=min_num_shards or subset.num_shards)
+            else:
+                if min_num_shards is not None and subset.num_shards < min_num_shards:
+                    logger.warning(
+                        f"{color.red}"
+                        f"Dataset {datasets[i]} has insufficient shards ({subset.num_shards}). "
+                        f"Need {min_num_shards} shards minimum for desired data parallel workers × "
+                        f"{num_workers} dataloader workers. "
+                        f"Resharding dataset to {min_num_shards} shards and disabling streaming mode."
+                        f"{color.reset}"
+                    )
+                    # again, it's ok to directly shuffle the map-style dataset
+                    # we expect an error raised if the map-style dataset still has not enough data shards
+                    subset = load_dataset(
+                        path=datasets[i],
+                        name=dataset_names[i],
+                        split=dataset_splits[i],
+                        data_dir=data_dirs[i],
+                        data_files=data_files[i],
+                        trust_remote_code=True,
+                        streaming=False,
+                        num_proc=num_workers,
+                    )
+                    subset = subset.shuffle(seed=seed)
+                    subset = subset.to_iterable_dataset(num_shards=min_num_shards or subset.num_shards)
+                else:
+                    # we set relatively small buffer size here as interleaving could provide some randomness
+                    subset = shuffle(
+                        subset,
+                        seed=seed,
+                        buffer_size=max(128, 1024 // len(datasets)),
+                    )
+
+            if "text" in subset.column_names:
+                subset = subset.select_columns("text")
+            elif "content" in subset.column_names:
+                subset = subset.select_columns("content")
+            else:
+                raise ValueError(
+                    f"Subset {datasets[i]} has no 'text' or 'content' column"
+                )
+            subsets.append(subset)
+
+        logger.info(
+            f"Interleaving {len(subsets)} datasets with probabilities {data_probs}"
+        )
+        dataset = interleave_datasets(
+            datasets=subsets,
+            probabilities=data_probs,
+            stopping_strategy="all_exhausted",
+            seed=seed,
+        )
+    logger.info(f"{dataset}")
+    return dataset
 
 
 def build_dataloader(

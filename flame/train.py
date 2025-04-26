@@ -10,7 +10,6 @@ import time
 from datetime import timedelta
 
 import torch
-from datasets import interleave_datasets, load_dataset
 from torch.distributed.elastic.multiprocessing.errors import record
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
@@ -19,7 +18,7 @@ from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from fla.ops.utils import prepare_position_ids
 from flame.components.checkpoint import TrainState
 from flame.config_manager import JobConfig
-from flame.data import build_dataloader, shuffle
+from flame.data import build_dataloader, build_dataset
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_nparams_and_flops
@@ -152,187 +151,18 @@ def main(job_config: JobConfig):
         if job_config.training.dataset_name is not None
         else ""
     )
-
-    min_num_shards = dp_degree * job_config.training.num_workers
-    if len(job_config.training.dataset.split(",")) == 1:
-        dataset = load_dataset(
-            path=job_config.training.dataset,
-            name=getattr(job_config.training, "dataset_name", None),
-            data_dir=getattr(job_config.training, "data_dir", None),
-            data_files=getattr(job_config.training, "data_files", None),
-            split=job_config.training.dataset_split or "train",
-            trust_remote_code=True,
-            streaming=job_config.training.streaming,
-            num_proc=(
-                job_config.training.num_workers
-                if not job_config.training.streaming
-                else None
-            ),
-        )
-        logger.info(f"{dataset}")
-
-        logger.info(f"Shuffling the dataset with seed {job_config.training.seed}")
-        if not job_config.training.streaming:
-            # the states of map-style dataset is recoverable after shuffling
-            dataset = dataset.shuffle(
-                seed=job_config.training.seed
-            ).to_iterable_dataset(num_shards=min_num_shards)
-        else:
-            if dataset.num_shards < min_num_shards:
-                logger.warning(
-                    f"{color.red}"
-                    f"Dataset {job_config.training.dataset} has insufficient shards ({dataset.num_shards}). "
-                    f"Need {min_num_shards} shards minimum for {dp_degree} data parallel workers × "
-                    f"{job_config.training.num_workers} dataloader workers. "
-                    f"Disabling the streaming mode and resharding dataset to {min_num_shards} shards."
-                    f"{color.reset}"
-                )
-                dataset = (
-                    load_dataset(
-                        path=job_config.training.dataset,
-                        name=getattr(job_config.training, "dataset_name", None),
-                        data_dir=getattr(job_config.training, "data_dir", None),
-                        data_files=getattr(job_config.training, "data_files", None),
-                        split=job_config.training.dataset_split or "train",
-                        trust_remote_code=True,
-                        streaming=False,
-                        num_proc=job_config.training.num_workers,
-                    )
-                    .shuffle(seed=job_config.training.seed)
-                    .to_iterable_dataset(num_shards=min_num_shards)
-                )
-            else:
-                dataset = shuffle(dataset, seed=job_config.training.seed)
-    else:
-        datasets = job_config.training.dataset.split(",")
-        if job_config.training.dataset_name is not None:
-            dataset_names = [
-                name or None for name in job_config.training.dataset_name.split(",")
-            ]
-            assert len(dataset_names) == len(datasets), (
-                "The number of dataset names must match the number of datasets"
-            )
-        else:
-            dataset_names = [None] * len(datasets)
-        if job_config.training.dataset_split is not None:
-            dataset_splits = [
-                split or "train"
-                for split in job_config.training.dataset_split.split(",")
-            ]
-            assert len(dataset_splits) == len(datasets), (
-                "The number of dataset splits must match the number of datasets"
-            )
-        else:
-            dataset_splits = ["train"] * len(datasets)
-        if job_config.training.data_dir is not None:
-            data_dirs = [
-                data_dir or None for data_dir in job_config.training.data_dir.split(",")
-            ]
-            assert len(data_dirs) == len(datasets), (
-                "The number of data dirs must match the number of datasets"
-            )
-        else:
-            data_dirs = [None] * len(datasets)
-        if job_config.training.data_files is not None:
-            data_files = job_config.training.data_files.split(",")
-            assert len(data_files) == len(datasets), (
-                "The number of data files must match the number of datasets"
-            )
-        else:
-            data_files = [None] * len(datasets)
-        if job_config.training.data_probs is not None:
-            data_probs = [float(p) for p in job_config.training.data_probs.split(",")]
-            assert len(data_probs) == len(datasets), (
-                "The number of data probabilities must match the number of datasets"
-            )
-        else:
-            raise ValueError(
-                "Data sampling probabilities are required if using multiple datasets"
-            )
-
-        subsets = []
-        for i, prob in enumerate(data_probs):
-            subset = load_dataset(
-                path=datasets[i],
-                name=dataset_names[i],
-                data_dir=data_dirs[i],
-                data_files=data_files[i],
-                split=dataset_splits[i],
-                trust_remote_code=True,
-                streaming=job_config.training.streaming,
-                num_proc=(
-                    job_config.training.num_workers
-                    if not job_config.training.streaming
-                    else None
-                ),
-            )
-            logger.info(
-                f"Subset {color.cyan}{datasets[i]}"
-                + (f":{dataset_names[i]} " if dataset_names[i] else " ")
-                + f"(p = {prob:.3f}){color.reset}:\n"
-                + f"{subset}"
-            )
-
-            logger.info(f"Shuffling the dataset with seed {job_config.training.seed}")
-            if not job_config.training.streaming:
-                # the states of map-style dataset is recoverable after shuffling
-                subset = subset.shuffle(
-                    seed=job_config.training.seed
-                ).to_iterable_dataset(num_shards=min_num_shards)
-            else:
-                if subset.num_shards < min_num_shards:
-                    logger.warning(
-                        f"{color.red}"
-                        f"Dataset {datasets[i]} has insufficient shards ({subset.num_shards}). "
-                        f"Need {min_num_shards} shards minimum for {dp_degree} data parallel workers × "
-                        f"{job_config.training.num_workers} dataloader workers. "
-                        f"Resharding dataset to {min_num_shards} shards and disabling streaming mode."
-                        f"{color.reset}"
-                    )
-                    # again, it's ok to directly shuffle the map-style dataset
-                    # we expect an error raised if the map-style dataset still has not enough data shards
-                    subset = (
-                        load_dataset(
-                            path=datasets[i],
-                            name=dataset_names[i],
-                            data_dir=data_dirs[i],
-                            data_files=data_files[i],
-                            split=dataset_splits[i],
-                            trust_remote_code=True,
-                            streaming=False,
-                            num_proc=job_config.training.num_workers,
-                        )
-                        .shuffle(seed=job_config.training.seed)
-                        .to_iterable_dataset(min_num_shards)
-                    )
-                else:
-                    # we set relatively small buffer size here as interleaving could provide some randomness
-                    subset = shuffle(
-                        subset,
-                        seed=job_config.training.seed,
-                        buffer_size=max(128, 1024 // len(datasets)),
-                    )
-
-            if "text" in subset.column_names:
-                subset = subset.select_columns("text")
-            elif "content" in subset.column_names:
-                subset = subset.select_columns("content")
-            else:
-                raise ValueError(
-                    f"Subset {datasets[i]} has no 'text' or 'content' column"
-                )
-            subsets.append(subset)
-
-        logger.info(
-            f"Interleaving {len(subsets)} datasets with probabilities {data_probs}"
-        )
-        dataset = interleave_datasets(
-            datasets=subsets,
-            probabilities=data_probs,
-            stopping_strategy="all_exhausted",
-            seed=job_config.training.seed,
-        )
-        logger.info(f"{dataset}")
+    dataset = build_dataset(
+        dataset=job_config.training.dataset,
+        dataset_name=job_config.training.dataset_name,
+        dataset_split=job_config.training.dataset_split,
+        data_dir=job_config.training.data_dir,
+        data_files=job_config.training.data_files,
+        data_probs=job_config.training.data_probs,
+        streaming=job_config.training.streaming,
+        dp_degree=dp_degree,
+        num_workers=job_config.training.num_workers,
+        seed=job_config.training.seed,
+    )
 
     logger.info("Building dataloader...")
     dataloader = build_dataloader(
