@@ -64,7 +64,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--num_workers',
         type=int,
-        default=32,
+        default=64,
         help='Number of workers to use for preprocessing',
     )
     parser.add_argument(
@@ -83,6 +83,12 @@ if __name__ == '__main__':
         default='fla-hub/transformer-1.3B-100B',
         help='Tokenizer to use',
     )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=2048,
+        help="Batch size for processing"
+    )
     args = parser.parse_args()
 
     logger.info(f'Loading tokenizer {args.tokenizer}')
@@ -100,8 +106,15 @@ if __name__ == '__main__':
         num_workers=args.num_workers,
         seed=args.seed,
     )
-    logger.info('Tokenizing dataset')
-    tokenized_dataset = dataset.map(tokenize, batched=True, fn_kwargs={'tokenizer': tokenizer})
-    logger.info(f'{tokenized_dataset}')
+    logger.info(f'Tokenizing and processing the dataset with batch size {args.batch_size}')
+    dataset = dataset.map(
+        lambda examples: tokenize(examples, tokenizer),
+        batched=True,
+        batch_size=args.batch_size,
+        remove_columns=list(next(iter(dataset)).keys()),
+        num_proc=args.num_workers,
+        desc="Running tokenizer on dataset"
+    )
+    logger.info(f'{dataset}')
     logger.info(f'Saving tokenized dataset to {args.path}')
-    tokenized_dataset.save_to_disk(args.path)
+    dataset.save_to_disk(args.path)
