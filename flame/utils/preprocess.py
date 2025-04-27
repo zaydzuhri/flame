@@ -13,14 +13,16 @@ from torchtitan.tools.logging import init_logger, logger
 def tokenize(
     examples: Dict[str, List[Any]],
     tokenizer: PreTrainedTokenizer,
-) -> Dict[str, List[List[int]]]:
+) -> Dict:
     if 'text' in examples:
-        input_ids = tokenizer(examples['text'])['input_ids']
+        samples = examples['text']
     elif 'content' in examples:
-        input_ids = tokenizer(examples['content'])['input_ids']
+        samples = examples['content']
     else:
         raise ValueError(f'No "text" or "content" field found in examples:\n{examples}')
-    return {'input_ids': input_ids}
+    input_ids = tokenizer(samples)['input_ids']
+    bits_per_token = [len(sample.encode(encoding='utf-8')) * 8 / len(input_ids[i]) for i, sample in enumerate(samples)]
+    return {'input_ids': input_ids, 'bits_per_token': bits_per_token}
 
 
 if __name__ == '__main__':
