@@ -2,7 +2,7 @@
 
 # 🔥 Flame: Flash Linear Attention Made Easy
 # This is a fork for the paper:
-# Softpick: No Attention Sinks, No Massive Activations with Rectified Softmax
+# Softpick: No Attention Sink, No Massive Activations with Rectified Softmax
 
 </div>
 
