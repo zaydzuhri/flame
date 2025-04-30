@@ -22,6 +22,8 @@ cd ../../
 pip install .
 pip install flash-attn --no-build-isolation
 ```
+The flash-linear-attention submodule has been changed to link to our fork: https://github.com/zaydzuhri/flash-linear-attention/tree/softpick-attention
+So no need to manually clone it.
 
 To prepare the fineweb-edu 100B sample the same way as described below.
 
