@@ -1,0 +1,63 @@
+{
+  "attention_bias": false,
+  "attn_impl": "parallel_softpick_attn",
+  "bos_token_id": 1,
+  "elementwise_affine": true,
+  "eos_token_id": 2,
+  "fuse_cross_entropy": true,
+  "fuse_norm": true,
+  "fuse_swiglu": true,
+  "hidden_act": "swish",
+  "hidden_ratio": 4,
+  "hidden_size": 1024,
+  "initializer_range": 0.006,
+  "intermediate_size": null,
+  "layer_head_pruned": [
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      7
+    ],
+    [
+      2,
+      12
+    ],
+    [
+      2,
+      13
+    ],
+    [
+      3,
+      5
+    ],
+    [
+      3,
+      13
+    ],
+    [
+      3,
+      14
+    ],
+    [
+      13,
+      6
+    ]
+  ],
+  "max_position_embeddings": 8192,
+  "model_type": "transformer_with_pruning",
+  "norm_eps": 1e-06,
+  "num_heads": 16,
+  "num_hidden_layers": 24,
+  "num_kv_heads": null,
+  "qk_norm": false,
+  "qkv_bias": false,
+  "rope_theta": 10000.0,
+  "tie_word_embeddings": false,
+  "transformers_version": "4.51.3",
+  "use_cache": true,
+  "vocab_size": 32000,
+  "window_size": null
+}
