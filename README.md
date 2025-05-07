@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🔥 Flame: Flash Linear Attention Made Easy
+# 🔥 Flame: A training framework for language modeling
 
 </div>
 
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency.
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for language models with blazing efficiency.
 
 **Feature Highlights:**
 
@@ -23,11 +23,16 @@ cd flame
 pip install .
 ```
 
-`flame` manages minimal dependencies, only including `fla` and `torchtitan` as submodules.
-After installation, initialize and update the submodules:
-```sh
-git submodule update --init --recursive
+Install the latest version of fla
 ```
+pip uninstall flash-linear-attention && pip install -U --no-use-pep517 git+https://github.com/fla-org/flash-linear-attention
+```
+
+[Important] Install specific version of torchtitan
+```
+pip install git+https://github.com/pytorch/torchtitan.git@5e2033c
+```
+
 
 ## Dataset Preparation
 To download the dataset to your local disk, create a new Python file with the following content and execute it:
@@ -44,8 +49,8 @@ dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_pro
 
 ## Training Recipes
 
-Here's an example of training a 340M FLA Transformer model with a LLaMA-like architecture from scratch on a 100BT subset of the Fineweb-edu corpus in streaming mode.
-
+Here's an example of training a 340M FLA Transformer model with a LLaMA-like architecture from scratch on a 100BT subset of the Fineweb-edu corpus ~~in streaming mode~~. (Do not use streaming mode if you are concerned about resuming training.)
+ 
 > [!WARNING]
 > If the dataset is not downloaded beforehand, the streaming mode will attempt to fetch it from a remote server and download it on-the-fly, which can be highly unstable during training due to network issues.  
 > For stable training, ensure the dataset is downloaded locally (see [**Dataset Preparation**](#dataset-preparation)). Otherwise, we assume you are only testing the new corpus.
@@ -53,12 +58,12 @@ Here's an example of training a 340M FLA Transformer model with a LLaMA-like arc
 ```sh
 bash train.sh \
   --job.config_file flame/models/fla.toml \
-  --job.dump_folder exp/transformer-340M-4K-10B/batch1.seqlen65536.context4096.warmup1024.update1.steps20480.lr3e-4.cosine \
+  --job.dump_folder exp/transformer-340M-4K-10B/batch1.seqlen65536.context4096.warmup1024.update1.steps20480.lr1e-3.cosine \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
   --optimizer.name AdamW \
   --optimizer.eps 1e-15 \
-  --optimizer.lr 3e-4 \
+  --optimizer.lr 1e-3 \
   --lr_scheduler.warmup_steps 1024 \
   --lr_scheduler.lr_min 0.1 \
   --lr_scheduler.decay_type cosine \
@@ -73,7 +78,6 @@ bash train.sh \
   --training.dataset HuggingFaceFW/fineweb-edu \
   --training.dataset_name sample-100BT \
   --training.dataset_split train \
-  --training.streaming \
   --training.num_workers 32 \
   --training.prefetch_factor 2 \
   --training.seed 42 \
@@ -88,7 +92,7 @@ You can specify the number of GPUs by setting the environment variable `NGPU`, w
 **For single-GPU debugging, set `NGPU=1`.**
 
 We provide several [config files](https://github.com/fla-org/flame/tree/main/configs) for different models.
-By default, the learning rate is set to 3e-4 with a cosine scheduler. Other schedulers, such as WSD (wsd), are also supported.
+By default, the learning rate is set to 1e-3 with a cosine scheduler. Other schedulers, such as WSD (wsd), are also supported.
 
 **Key parameters:**
 - `--lr_scheduler.decay_ratio`: The proportion of the steps allocated to the decay phase. The learning rate will remain stable after the warmup period and only start decaying during the last `decay_ratio` portion of the total training steps, which is known as the Warmup-Stable-Decay (WSD) schedule.
