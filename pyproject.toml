@@ -16,6 +16,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    'flash-linear-attention',
     'torch>=2.5',
     'torchdata',
     'transformers>=4.45.0',
