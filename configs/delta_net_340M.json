@@ -9,7 +9,7 @@
     "hidden_act": "swish",
     "hidden_ratio": 4,
     "hidden_size": 1024,
-    "initializer_range": 0.006,
+    "initializer_range": 0.02,
     "intermediate_size": null,
     "model_type": "delta_net",
     "norm_eps": 1e-06,
