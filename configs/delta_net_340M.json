@@ -13,7 +13,6 @@
     "intermediate_size": null,
     "model_type": "delta_net",
     "norm_eps": 1e-06,
-    "norm_first": false,
     "num_heads": 8,
     "num_hidden_layers": 24,
     "qk_activation": "silu",
