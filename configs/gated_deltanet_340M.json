@@ -1,0 +1,22 @@
+{
+    "attn_mode": "chunk",
+    "bos_token_id": 1,
+    "conv_size": 4,
+    "eos_token_id": 2,
+    "expand_v": 2,
+    "fuse_cross_entropy": true,
+    "head_dim": 256,
+    "hidden_act": "swish",
+    "hidden_ratio": 4,
+    "hidden_size": 1024,
+    "initializer_range": 0.02,
+    "intermediate_size": null,
+    "model_type": "gated_deltanet",
+    "norm_eps": 1e-06,
+    "num_heads": 6,
+    "num_hidden_layers": 21,
+    "tie_word_embeddings": false,
+    "use_cache": true,
+    "use_gate": true,
+    "use_short_conv": true
+}
