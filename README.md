@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔥 Flame: A training framework for language modeling
+# 🔥 Flame: Flash Language Modeling Made Easy
 
 </div>
 
@@ -473,3 +473,17 @@ To set up multi-node training:
 * If you're using a job scheduler like Slurm, it will handle these variables for you.
 
 `torchtitan` provides a [Slurm script](https://github.com/pytorch/torchtitan/blob/main/multinode_trainer.slurm) for multi-node training, which you can use as a reference or starting point.
+
+## Citation
+
+If you find `flame` helpful for your work, please consider citing it.
+
+```bib
+@software{yang2025flame,
+  title  = {Flame: Flash Language Modeling Made Easy},
+  author = {Yang, Songlin and Zhang, Yu},
+  url    = {https://github.com/fla-org/flame},
+  month  = jan,
+  year   = {2025}
+}
+```
