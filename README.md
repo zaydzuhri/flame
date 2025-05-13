@@ -481,7 +481,7 @@ If you find `flame` helpful for your work, please consider citing it.
 ```bib
 @software{yang2025flame,
   title  = {Flame: Flash Language Modeling Made Easy},
-  author = {Yang, Songlin and Zhang, Yu},
+  author = {Zhang, Yu and Yang, Songlin},
   url    = {https://github.com/fla-org/flame},
   month  = jan,
   year   = {2025}
