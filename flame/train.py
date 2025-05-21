@@ -589,6 +589,8 @@ def main(job_config: JobConfig):
             optimizers.zero_grad()
 
             losses = []
+            ntp_losses = []
+            myopic_losses = []
             # do gradient accumulation if enabled
             for _ in range(job_config.training.gradient_accumulation_steps):
                 # get batch
@@ -681,9 +683,21 @@ def main(job_config: JobConfig):
                             / job_config.training.gradient_accumulation_steps
                         )
                         loss.backward()
+                        ntp_loss = (
+                            output.ntp_loss
+                            / job_config.training.gradient_accumulation_steps
+                        ).detach()
+                        myopic_loss = (
+                            output.myopic_loss
+                            / job_config.training.gradient_accumulation_steps
+                        ).detach() if model_config.use_myopic_loss else None
 
                 losses.append(loss)
+                ntp_losses.append(ntp_loss)
+                if model_config.use_myopic_loss: myopic_losses.append(myopic_loss)
             loss = sum(losses)
+            ntp_loss = sum(ntp_losses)
+            myopic_loss = sum(myopic_losses) if model_config.use_myopic_loss else None
 
             # clip gradients
             grad_norm = dist_utils.clip_grad_norm_(
@@ -726,9 +740,37 @@ def main(job_config: JobConfig):
                             world_mesh["dp_cp"],
                         ),
                     )
+                    global_avg_ntp_loss, global_max_ntp_loss = (
+                        dist_utils.dist_mean(
+                            ntp_loss,
+                            world_mesh["dp_cp"],
+                        ),
+                        dist_utils.dist_max(
+                            ntp_loss,
+                            world_mesh["dp_cp"],
+                        ),
+                    )
+                    if model_config.use_myopic_loss:
+                        global_avg_myopic_loss, global_max_myopic_loss = (
+                            dist_utils.dist_mean(
+                                myopic_loss,
+                                world_mesh["dp_cp"],
+                            ),
+                            dist_utils.dist_max(
+                                myopic_loss,
+                                world_mesh["dp_cp"],
+                            ),
+                        )
+                    else:
+                        global_avg_myopic_loss = global_max_myopic_loss = 0
                 else:
                     # Scale back the loss before logging
                     global_avg_loss = global_max_loss = loss.item()
+                    global_avg_ntp_loss = global_max_ntp_loss = ntp_loss.item()
+                    if model_config.use_myopic_loss:
+                        global_avg_myopic_loss = global_max_myopic_loss = myopic_loss.item()
+                    else:
+                        global_avg_myopic_loss = global_max_myopic_loss = 0
 
                 # Update train state tokens and elapsed time
                 time_now = time.perf_counter()
@@ -760,6 +802,10 @@ def main(job_config: JobConfig):
                         "optimizer/lr": last_lr,
                         "optimizer/grad_norm": grad_norm.item(),
                         "optimizer/skipped_step": train_state.skipped_step,
+                        "loss_metrics/global_avg_ntp_loss": global_avg_ntp_loss,
+                        "loss_metrics/global_max_ntp_loss": global_max_ntp_loss,
+                        "loss_metrics/global_avg_myopic_loss": global_avg_myopic_loss,
+                        "loss_metrics/global_max_myopic_loss": global_max_myopic_loss,
                     },
                 )
 
