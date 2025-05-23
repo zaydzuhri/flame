@@ -36,7 +36,7 @@ setup(
     ],
     python_requires='>=3.10',
     install_requires=[
-        'torch>=2.5',
+        'torch==2.6',
         'torchdata',
         'transformers>=4.45.0',
         'triton>=3.0',
