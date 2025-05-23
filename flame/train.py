@@ -351,6 +351,10 @@ def main(job_config: JobConfig):
         )
         logger.info(f"{dataset}")
 
+
+    logger.info(f"Loading model config from {job_config.model.config}")
+    model_config = AutoConfig.from_pretrained(job_config.model.config)
+
     logger.info("Building dataloader...")
     dataloader = build_dataloader(
         dataset=dataset,
@@ -358,7 +362,7 @@ def main(job_config: JobConfig):
         rank=dp_rank,
         world_size=dp_degree,
         batch_size=job_config.training.batch_size,
-        seq_len=job_config.training.seq_len,
+        seq_len=job_config.training.seq_len if not model_config.use_myopic_loss else job_config.training.seq_len*2,
         context_len=job_config.training.context_len,
         varlen=job_config.training.varlen,
         num_workers=job_config.training.num_workers,
@@ -367,8 +371,6 @@ def main(job_config: JobConfig):
         snapshot_every_n_steps=job_config.checkpoint.interval,
     )
 
-    logger.info(f"Loading model config from {job_config.model.config}")
-    model_config = AutoConfig.from_pretrained(job_config.model.config)
     # set the model configs from training inputs:
     # 1. norm type to decide which norm layer to use
     # 2. disable fused norm if TP is enabled
@@ -596,10 +598,10 @@ def main(job_config: JobConfig):
                 # get batch
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
-                input_ids, labels = batch["input_ids"], batch["labels"]
+                input_ids, labels = batch["input_ids"][:, :job_config.training.seq_len], batch["labels"]
 
                 # Update metrics processor state before forward/backward
-                metric_logger.ntokens_since_last_log += labels.numel()
+                metric_logger.ntokens_since_last_log += input_ids.numel()
                 metric_logger.data_loading_times.append(
                     time.perf_counter() - data_load_start
                 )
