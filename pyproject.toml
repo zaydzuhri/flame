@@ -28,6 +28,9 @@ dependencies = [
     'tensorboard',
 ]
 
+[tool.setuptools.dynamic]
+version = {attr = "flame.__version__"}
+
 [project.optional-dependencies]
 dev = ["pytest"]
 
