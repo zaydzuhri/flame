@@ -1,8 +1,49 @@
 <div align="center">
 
 # 🔥 Flame: Flash Linear Attention Made Easy
+# This is a fork for the paper:
+# Softpick: No Attention Sink, No Massive Activations with Rectified Softmax
 
 </div>
+
+## Instructions for Softpick Attention
+
+This fork can only work on an older commit of torchtitan and flame, so the setup looks like this:
+
+```bash
+git clone https://github.com/zaydzuhri/flame.git
+cd flame
+git checkout softpick-attention
+git submodule update --init --recursive --remote
+cd 3rdparty/torchtitan
+git checkout 4f532e0
+cd ../../
+
+pip install .
+pip install flash-attn --no-build-isolation
+```
+The flash-linear-attention submodule has been changed to link to our fork: https://github.com/zaydzuhri/flash-linear-attention/tree/softpick-attention
+So no need to manually clone it.
+
+To prepare the fineweb-edu 100B sample the same way as described below.
+
+These are the training commands used in the paper:
+```bash
+NGPU=8 bash train.sh   --job.config_file flame/models/fla.toml   --job.dump_folder exp/vanilla.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine   --model.config configs/vanilla_transformer_340M.json   --model.tokenizer_path fla-hub/transformer-1.3B-100B   --optimizer.name AdamW   --optimizer.eps 1e-15   --optimizer.lr 3e-4   --lr_scheduler.warmup_steps 1000   --lr_scheduler.lr_min 0.1   --lr_scheduler.decay_type cosine   --training.batch_size 16   --training.seq_len 4096   --training.context_len 4096   --training.gradient_accumulation_steps 1   --training.steps 100000   --training.max_norm 1.0   --training.skip_nan_inf  --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT  --training.dataset_split train   --training.num_workers 32   --training.prefetch_factor 2   --training.seed 79   --training.compile   --checkpoint.interval 10000   --checkpoint.load_step -1   --metrics.log_freq 5 --checkpoint.hf_upload_enabled   --checkpoint.hf_repo_base_name "zaydzuhri/vanilla-340M-4096-batch16-steps100000" --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh   --job.config_file flame/models/fla.toml   --job.dump_folder exp/softpick.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine   --model.config configs/softpick_transformer_340M.json   --model.tokenizer_path fla-hub/transformer-1.3B-100B   --optimizer.name AdamW   --optimizer.eps 1e-15   --optimizer.lr 3e-4   --lr_scheduler.warmup_steps 1000   --lr_scheduler.lr_min 0.1   --lr_scheduler.decay_type cosine   --training.batch_size 16   --training.seq_len 4096   --training.context_len 4096   --training.gradient_accumulation_steps 1   --training.steps 100000   --training.max_norm 1.0   --training.skip_nan_inf  --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT  --training.dataset_split train   --training.num_workers 32   --training.prefetch_factor 2   --training.seed 79   --training.compile   --checkpoint.interval 10000   --checkpoint.load_step -1   --metrics.log_freq 5 --checkpoint.hf_upload_enabled   --checkpoint.hf_repo_base_name "zaydzuhri/softpick-340M-4096-batch16-steps100000" --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+```
+
+And the same for the extra experiments in the appendix:
+```bash
+NGPU=8 bash train.sh   --job.config_file flame/models/fla.toml   --job.dump_folder exp/rectified.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine   --model.config configs/rectified_transformer_340M.json   --model.tokenizer_path fla-hub/transformer-1.3B-100B   --optimizer.name AdamW   --optimizer.eps 1e-15   --optimizer.lr 3e-4   --lr_scheduler.warmup_steps 1000   --lr_scheduler.lr_min 0.1   --lr_scheduler.decay_type cosine   --training.batch_size 16   --training.seq_len 4096   --training.context_len 4096   --training.gradient_accumulation_steps 1   --training.steps 100000   --training.max_norm 1.0   --training.skip_nan_inf  --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT  --training.dataset_split train   --training.num_workers 32   --training.prefetch_factor 2   --training.seed 79   --training.compile   --checkpoint.interval 10000   --checkpoint.load_step -1   --metrics.log_freq 5 --checkpoint.hf_upload_enabled   --checkpoint.hf_repo_base_name "zaydzuhri/rectified-340M-4096-batch16-steps100000" --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh   --job.config_file flame/models/fla.toml   --job.dump_folder exp/softpick.scaled.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine   --model.config configs/softpick_scaled_transformer_340M.json   --model.tokenizer_path fla-hub/transformer-1.3B-100B   --optimizer.name AdamW   --optimizer.eps 1e-15   --optimizer.lr 3e-4   --lr_scheduler.warmup_steps 1000   --lr_scheduler.lr_min 0.1   --lr_scheduler.decay_type cosine   --training.batch_size 16   --training.seq_len 4096   --training.context_len 4096   --training.gradient_accumulation_steps 1   --training.steps 100000   --training.max_norm 1.0   --training.skip_nan_inf  --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT  --training.dataset_split train   --training.num_workers 32   --training.prefetch_factor 2   --training.seed 79   --training.compile   --checkpoint.interval 10000   --checkpoint.load_step -1   --metrics.log_freq 5 --checkpoint.hf_upload_enabled   --checkpoint.hf_repo_base_name "zaydzuhri/softpick-scaled-340M-4096-batch16-steps100000" --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+```
+
+Feel free to DM @zmkzmkz on X for any questions regarding the paper or this code!
+
+## Flame
 
 Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency.
 
