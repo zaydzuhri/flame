@@ -374,7 +374,7 @@ def main(job_config: JobConfig):
         world_size=dp_degree,
         batch_size=job_config.training.batch_size,
         # TODO: Make this more modular
-        # seq_len=job_config.training.seq_len if not model_config.use_myopic_loss else job_config.training.seq_len*2,
+        # seq_len=job_config.training.seq_len if not model_config.use_top_loss else job_config.training.seq_len*2,
         seq_len=job_config.training.seq_len * 2,
         context_len=job_config.training.context_len,
         varlen=job_config.training.varlen,
@@ -610,7 +610,7 @@ def main(job_config: JobConfig):
                 # get batch
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
-                # Recall that this is, for myopic and MTP, it will be 
+                # Recall that this is, for top and MTP, it will be 
                 # input_ids : (B, seq_len)
                 # labels : (B, seq_len * 2)
                 input_ids, labels = batch["input_ids"][:, :job_config.training.seq_len], batch["labels"]

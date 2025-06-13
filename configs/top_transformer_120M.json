@@ -15,5 +15,6 @@
     "tie_word_embeddings": true,
     "use_cache": true,
     "vocab_size": 32000,
-    "use_myopic_loss": true
+    "use_top_loss": true,
+    "top_window_size": 2048
 }
