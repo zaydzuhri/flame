@@ -8,6 +8,8 @@ import json
 import os
 import time
 from datetime import timedelta
+from collections import defaultdict
+import dataclasses
 
 import torch
 from datasets import interleave_datasets, load_dataset
@@ -40,6 +42,15 @@ from torchtitan.protocols.train_spec import TrainSpec, get_train_spec, register_
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.tools.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+
+from dotenv import load_dotenv
+load_dotenv()
+
+import wandb
+wandb.login(key=os.environ["WANDB_API_KEY"])
+
+import huggingface_hub
+huggingface_hub.login(token=os.environ["HF_TOKEN"])
 
 
 def build_tokenizer(job_config: JobConfig) -> AutoTokenizer:
@@ -362,7 +373,9 @@ def main(job_config: JobConfig):
         rank=dp_rank,
         world_size=dp_degree,
         batch_size=job_config.training.batch_size,
-        seq_len=job_config.training.seq_len if not model_config.use_myopic_loss else job_config.training.seq_len*2,
+        # TODO: Make this more modular
+        # seq_len=job_config.training.seq_len if not model_config.use_myopic_loss else job_config.training.seq_len*2,
+        seq_len=job_config.training.seq_len * 2,
         context_len=job_config.training.context_len,
         varlen=job_config.training.varlen,
         num_workers=job_config.training.num_workers,
@@ -590,14 +603,16 @@ def main(job_config: JobConfig):
 
             optimizers.zero_grad()
 
-            losses = []
-            ntp_losses = []
-            myopic_losses = []
+            losses = defaultdict(list)
+            actual_loss = []
             # do gradient accumulation if enabled
             for _ in range(job_config.training.gradient_accumulation_steps):
                 # get batch
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
+                # Recall that this is, for myopic and MTP, it will be 
+                # input_ids : (B, seq_len)
+                # labels : (B, seq_len * 2)
                 input_ids, labels = batch["input_ids"][:, :job_config.training.seq_len], batch["labels"]
 
                 # Update metrics processor state before forward/backward
@@ -680,26 +695,25 @@ def main(job_config: JobConfig):
                             position_ids=position_ids,
                             cu_seqlens=cu_seqlens,
                         )
+                        output_attributes = [field.name for field in dataclasses.fields(output)]
+                        losses_atributes = [x for x in output_attributes if "loss" in x and x != "loss"]
                         loss = (
                             output.loss
                             / job_config.training.gradient_accumulation_steps
                         )
                         loss.backward()
-                        ntp_loss = (
-                            output.ntp_loss
-                            / job_config.training.gradient_accumulation_steps
-                        ).detach()
-                        myopic_loss = (
-                            output.myopic_loss
-                            / job_config.training.gradient_accumulation_steps
-                        ).detach() if model_config.use_myopic_loss else None
 
-                losses.append(loss)
-                ntp_losses.append(ntp_loss)
-                if model_config.use_myopic_loss: myopic_losses.append(myopic_loss)
-            loss = sum(losses)
-            ntp_loss = sum(ntp_losses)
-            myopic_loss = sum(myopic_losses) if model_config.use_myopic_loss else None
+                    actual_loss.append(loss)
+                    for loss_attr in losses_atributes:
+                        custom_loss = getattr(output, loss_attr, None)
+                        if custom_loss is not None:
+                            custom_loss = custom_loss / job_config.training.gradient_accumulation_steps
+                            custom_loss = custom_loss
+                            losses[loss_attr].append(custom_loss)
+
+            loss = sum(actual_loss)
+            for loss_attr, loss_values in losses.items():
+                losses[loss_attr] = sum(loss_values)
 
             # clip gradients
             grad_norm = dist_utils.clip_grad_norm_(
@@ -724,6 +738,8 @@ def main(job_config: JobConfig):
             lr_schedulers.step()
 
             # log metrics - Use MetricsProcessor
+            global_avg_custom_loss = {}
+            global_max_custom_loss = {}
             if metric_logger.should_log(train_state.step):
                 if (
                     parallel_dims.dp_replicate_enabled
@@ -742,37 +758,20 @@ def main(job_config: JobConfig):
                             world_mesh["dp_cp"],
                         ),
                     )
-                    global_avg_ntp_loss, global_max_ntp_loss = (
-                        dist_utils.dist_mean(
-                            ntp_loss,
-                            world_mesh["dp_cp"],
-                        ),
-                        dist_utils.dist_max(
-                            ntp_loss,
-                            world_mesh["dp_cp"],
-                        ),
-                    )
-                    if model_config.use_myopic_loss:
-                        global_avg_myopic_loss, global_max_myopic_loss = (
-                            dist_utils.dist_mean(
-                                myopic_loss,
-                                world_mesh["dp_cp"],
-                            ),
-                            dist_utils.dist_max(
-                                myopic_loss,
-                                world_mesh["dp_cp"],
-                            ),
+                    for loss_attr, loss_value in losses.items():
+                        global_avg_custom_loss[loss_attr] = dist_utils.dist_mean(
+                            loss_value, world_mesh["dp_cp"]
                         )
-                    else:
-                        global_avg_myopic_loss = global_max_myopic_loss = 0
+                        global_max_custom_loss[loss_attr] = dist_utils.dist_max(
+                            loss_value, world_mesh["dp_cp"]
+                        )
                 else:
                     # Scale back the loss before logging
                     global_avg_loss = global_max_loss = loss.item()
-                    global_avg_ntp_loss = global_max_ntp_loss = ntp_loss.item()
-                    if model_config.use_myopic_loss:
-                        global_avg_myopic_loss = global_max_myopic_loss = myopic_loss.item()
-                    else:
-                        global_avg_myopic_loss = global_max_myopic_loss = 0
+                    for loss_attr, loss_value in losses.items():
+                        global_avg_custom_loss[loss_attr] = global_max_custom_loss[
+                            loss_attr
+                        ] = loss_value.item()
 
                 # Update train state tokens and elapsed time
                 time_now = time.perf_counter()
@@ -796,19 +795,18 @@ def main(job_config: JobConfig):
                     * (job_config.training.steps - train_state.step)
                     / train_state.step
                 )
+                extra_metrics = {
+                    "optimizer/lr": last_lr,
+                    "optimizer/grad_norm": grad_norm.item(),
+                    "optimizer/skipped_step": train_state.skipped_step,
+                }
+                for loss_attr, loss_value in global_avg_custom_loss.items():
+                    extra_metrics[f"loss_metrics/global_avg_{loss_attr}"] = loss_value.item() if isinstance(loss_value, torch.Tensor) else loss_value
                 metric_logger.log(
                     train_state.step,
                     global_avg_loss,
                     global_max_loss,
-                    extra_metrics={
-                        "optimizer/lr": last_lr,
-                        "optimizer/grad_norm": grad_norm.item(),
-                        "optimizer/skipped_step": train_state.skipped_step,
-                        "loss_metrics/global_avg_ntp_loss": global_avg_ntp_loss,
-                        "loss_metrics/global_max_ntp_loss": global_max_ntp_loss,
-                        "loss_metrics/global_avg_myopic_loss": global_avg_myopic_loss,
-                        "loss_metrics/global_max_myopic_loss": global_max_myopic_loss,
-                    },
+                    extra_metrics=extra_metrics,
                 )
 
                 logger.info(
