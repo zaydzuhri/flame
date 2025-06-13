@@ -38,7 +38,7 @@ setup(
     install_requires=[
         'torch==2.6',
         'torchdata',
-        'transformers>=4.45.0',
+        'transformers==4.51.3',
         'triton>=3.0',
         'datasets>=3.3.0',
         'einops',
@@ -46,5 +46,6 @@ setup(
         'wandb',
         'tiktoken',
         'tensorboard',
+        'python-dotenv'
     ],
 )
