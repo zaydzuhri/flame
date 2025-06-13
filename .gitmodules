@@ -1,10 +1,11 @@
 [submodule "3rdparty/flash-linear-attention"]
 	path = 3rdparty/flash-linear-attention
 	url = https://github.com/zaydzuhri/flash-linear-attention.git
-	branch = myopic
+	branch = token-order-prediction
 [submodule "3rdparty/torchtitan"]
 	path = 3rdparty/torchtitan
-	url = https://github.com/pytorch/torchtitan.git
+	url = https://github.com/Erland366/torchtitan.git
+	branch = token-order-prediction
 [submodule "3rdparty/lm-evaluation-harness"]
 	path = 3rdparty/lm-evaluation-harness
 	url = https://github.com/EleutherAI/lm-evaluation-harness
