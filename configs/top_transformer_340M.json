@@ -8,7 +8,7 @@
     "hidden_size": 1024,
     "initializer_range": 0.006,
     "max_position_embeddings": 8192,
-    "model_type": "transformer",
+    "model_type": "top_transformer",
     "num_heads": 16,
     "num_hidden_layers": 24,
     "norm_eps": 1e-06,
