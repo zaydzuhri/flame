@@ -18,5 +18,5 @@
     "tie_word_embeddings": false,
     "use_cache": true,
     "window_size": null,
-    "n_future_tokens": 3
+    "n_future_tokens": 4
 }

@@ -15,5 +15,5 @@
     "tie_word_embeddings": true,
     "use_cache": true,
     "vocab_size": 32000,
-    "n_future_tokens": 3
+    "n_future_tokens": 4
 }

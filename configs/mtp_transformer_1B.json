@@ -19,5 +19,5 @@
     "pad_token_id": 2,
     "rope_theta": 10000.0,
     "tie_word_embeddings": false,
-    "n_future_tokens": 3
+    "n_future_tokens": 4
 }
