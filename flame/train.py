@@ -198,13 +198,13 @@ def main(job_config: JobConfig):
             )
             model_config.fuse_norm = False
     if parallel_dims.loss_parallel_enabled:
-        if model_config.fuse_cross_entropy:
+        if model_config.fuse_linear_cross_entropy:
             logger.warning(
                 f"{color.red}"
                 f"Loss parallel enabled. Disabling fused cross entropy for now."
                 f"{color.reset}"
             )
-            model_config.fuse_cross_entropy = False
+            model_config.fuse_linear_cross_entropy = False
     model_config.vocab_size = max(tokenizer.vocab_size, model_config.vocab_size)
 
     logger.info(
@@ -213,7 +213,7 @@ def main(job_config: JobConfig):
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(model_config)
         if (
-            getattr(model_config, "fuse_cross_entropy", False)
+            getattr(model_config, "fuse_linear_cross_entropy", False)
             and FusedLinearCrossEntropyLoss is not None
         ):
             model.criterion = FusedLinearCrossEntropyLoss(
