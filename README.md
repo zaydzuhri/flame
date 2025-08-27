@@ -1,8 +1,59 @@
 <div align="center">
 
 # 🔥 Flame: Flash Linear Attention Made Easy
+# This is a fork for the paper:
+# "Predicting the Order of Upcoming Tokens Improves Language Modeling"
 
 </div>
+
+## Instructions for Token Order Prediction
+
+This fork can only work on an older commit of flame and torchtitan (forked at https://github.com/Erland366/torchtitan, see .gitmodules), so the setup looks like this:
+
+```bash
+git clone https://github.com/zaydzuhri/flame.git
+cd flame
+git checkout token-order-prediction
+git submodule update --init --recursive --remote
+pip install .
+pip install wheel
+pip install flash-attn==2.7.3 --no-build-isolation --no-cache-dir
+```
+The flash-linear-attention submodule has been changed to link to our fork: https://github.com/zaydzuhri/flash-linear-attention/tree/token-order-prediction
+So no need to manually clone it.
+
+Then prepare the fineweb-edu 100B sample the same way as described in the flame repo guide below, or:
+```py
+from datasets import load_dataset
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=32, cache_dir="~/.cache")
+```
+
+These are the training commands used in the paper:
+```bash
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/vanilla.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine --model.config configs/vanilla_transformer_340M.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 3e-4 --lr_scheduler.warmup_steps 1000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 16 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 1 --training.steps 100000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/vanilla-340M-4096-batch16-steps100000 --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/mtp.340M.batch16.seqlen4096.context4096.warmup1000.update1.steps100000.lr3e-4.cosine --model.config configs/mtp_transformer_340M.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 3e-4 --lr_scheduler.warmup_steps 1000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 16 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 1 --training.steps 100000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/mtp-340M-4096-batch16-steps100000 --comm.init_timeout_seconds 1800 --comm.train_timeout_seconds 1800
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/top.340M.batch8.seqlen4096.context4096.warmup1000.update2.steps100000.lr3e-4.cosine --model.config configs/top_transformer_340M.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 3e-4 --lr_scheduler.warmup_steps 1000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 100000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/top-340M-4096-batch16-steps100000 --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/vanilla.1B.batch8.seqlen4096.context4096.warmup2000.update2.steps200000.lr2e-4.cosine --model.config configs/vanilla_transformer_1B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/vanilla-1B-4096-batch8x2-steps200000 --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/mtp.1B.batch16.seqlen4096.context4096.warmup2000.update1.steps200000.lr2e-4.cosine --model.config configs/mtp_transformer_1B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 16 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 1 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/mtp-1B-4096-batch16x1-steps200000 --comm.init_timeout_seconds 1800 --comm.train_timeout_seconds 1800
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/top.1B.batch8.seqlen4096.context4096.warmup2000.update2.steps200000.lr2e-4.cosine --model.config configs/top_transformer_1B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/top-1B-4096-batch8x2-steps200000 --comm.init_timeout_seconds 600 --comm.train_timeout_seconds 300
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/vanilla.7B.batch8.seqlen4096.context4096.warmup2000.update2.steps200000.lr1.2e-4.cosine --model.config configs/transformer_7B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 1.2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/vanilla-7B-4096-batch8x2-steps200000 --comm.init_timeout_seconds 1800 --comm.train_timeout_seconds 1800
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/mtp.7B.batch8.seqlen4096.context4096.warmup2000.update2.steps200000.lr1.2e-4.cosine --model.config configs/mtp_transformer_7B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 1.2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/mtp-7B-4096-batch8x2-steps200000 --comm.init_timeout_seconds 1800 --comm.train_timeout_seconds 1800
+
+NGPU=8 bash train.sh --job.config_file flame/models/fla.toml --job.dump_folder exp/top.7B.batch8.seqlen4096.context4096.warmup2000.update2.steps200000.lr1.2e-4.cosine --model.config configs/top_transformer_7B.json --model.tokenizer_path fla-hub/transformer-1.3B-100B --optimizer.name AdamW --optimizer.eps 1e-15 --optimizer.lr 1.2e-4 --lr_scheduler.warmup_steps 2000 --lr_scheduler.lr_min 0.1 --lr_scheduler.decay_type cosine --training.batch_size 8 --training.seq_len 4096 --training.context_len 4096 --training.gradient_accumulation_steps 2 --training.steps 200000 --training.max_norm 1.0 --training.skip_nan_inf --training.dataset ~/.cache/HuggingFaceFW___fineweb-edu/sample-100BT --training.dataset_split train --training.num_workers 32 --training.prefetch_factor 2 --training.seed 79 --training.compile --checkpoint.interval 10000 --checkpoint.load_step -1 --metrics.log_freq 5 --checkpoint.hf_upload_enabled --checkpoint.hf_repo_base_name zaydzuhri/top-7B-4096-batch8x2-steps200000 --comm.init_timeout_seconds 1800 --comm.train_timeout_seconds 1800
+```
+
+Check out the wandb for training logs (although it is very unorganized lol): https://wandb.ai/zaydzuhri/fla
+
+Feel free to DM @zmkzmkz on X for any questions regarding the paper or this code!
+
+## Flame
 
 Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency.
 
