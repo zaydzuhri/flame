@@ -9,7 +9,7 @@
     "hidden_size": 4096,
     "initializer_range": 0.006,
     "intermediate_size": 14336,
-    "model_type": "transformer",
+    "model_type": "mono_transformer",
     "norm_eps": 1e-06,
     "num_heads": 32,
     "num_hidden_layers": 30,
