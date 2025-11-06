@@ -123,6 +123,14 @@ def main(args):
                         print(f"Warning: Requested max evaluation length ({max_k_needed}) is greater than the MTP model's head count ({num_heads}). Clamping to {num_heads}.")
                         max_k_needed = num_heads
                     top_sequences_full = torch.argmax(logits, dim=-1)[:, -1, :max_k_needed]
+
+                elif args.model_type == 'dsmtp':
+                    logits = model(**input_dict, output_dsmtp_logits=True).logits.transpose(1, 2)
+                    num_heads = logits.size(2)
+                    if max_k_needed > num_heads:
+                        print(f"Warning: Requested max evaluation length ({max_k_needed}) is greater than the MTP model's head count ({num_heads}). Clamping to {num_heads}.")
+                        max_k_needed = num_heads
+                    top_sequences_full = torch.argmax(logits, dim=-1)[:, -1, :max_k_needed]
                 
                 # Step 2: Run verification pass to get the ground-truth greedy sequence
                 verify_input_ids = torch.cat([input_ids, top_sequences_full], dim=1)
@@ -175,7 +183,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate LCP and NDCG for custom HF language models.")
     
     parser.add_argument("--model_name", type=str, required=True, help="Hugging Face model name.")
-    parser.add_argument("--model_type", type=str, default="top", choices=["top", "mtp"], help="Type of the model head to evaluate (TOP or MTP).")
+    parser.add_argument("--model_type", type=str, default="top", choices=["top", "mtp", "dsmtp"], help="Type of the model head to evaluate (TOP or MTP).")
     parser.add_argument("--dataset_name", type=str, required=True, help="Hugging Face dataset name.")
     parser.add_argument("--dataset_subset", type=str, default=None, help="The subset/configuration of the dataset to use (e.g., 'en.noblocklist').")
     parser.add_argument("--dataset_split", type=str, default="train", help="Dataset split to use.")
