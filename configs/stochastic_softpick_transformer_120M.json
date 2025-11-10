@@ -8,12 +8,13 @@
     "hidden_size": 768,
     "initializer_range": 0.02,
     "max_position_embeddings": 4096,
-    "model_type": "transformer",
+    "model_type": "stochastic_softpick_transformer",
     "num_heads": 12,
     "num_hidden_layers": 14,
     "norm_eps": 1e-06,
     "tie_word_embeddings": true,
     "use_cache": true,
     "vocab_size": 32000,
-    "attn_impl": "parallel_softpick_attn"
+    "attn_impl": "parallel_softpick_attn",
+    "stochastic_p": 0.7
 }
