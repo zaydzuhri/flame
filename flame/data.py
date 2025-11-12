@@ -23,7 +23,7 @@ from torchtitan.tools.logging import logger
 class BufferShuffledIterableDataset(IterableDataset):
     def __init__(
         self,
-        dataset: Dataset,
+        dataset: IterableDataset,
         tokenizer: PreTrainedTokenizer,
         seq_len: int = 2048,
         rank: int = 0,
@@ -335,6 +335,7 @@ class DataCollatorForLanguageModeling:
     tokenizer: PreTrainedTokenizer
     context_len: Optional[int] = None
     varlen: bool = False
+    padding_side: str = "left"
 
     def __call__(self, examples: List[Union[List[int], Dict[str, Any]]]) -> Dict[str, Any]:
         if not isinstance(examples[0], Dict):
@@ -368,7 +369,7 @@ class DataCollatorForLanguageModeling:
                         f'({self.tokenizer.__class__.__name__}) does not have a pad token.'
                     )
                 # Pad using the tokenizer, ensuring attention_mask is returned
-                batch = self.tokenizer.pad(examples, return_tensors='pt', return_attention_mask=True)
+                batch = self.tokenizer.pad(examples, return_tensors='pt', return_attention_mask=True, padding_side=self.padding_side)
             else:
                 # No padding needed, stack directly and create a full attention mask
                 input_ids = torch.stack([example['input_ids'] for example in examples], dim=0)
@@ -541,6 +542,82 @@ class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
         super().load_state_dict(pickle.loads(state_dict[f'rank_{self.rank}']))
 
 
+class FinetuneIterableDataset(IterableDataset):
+    """
+    Iterable dataset that preserves per-example boundaries for finetuning workloads.
+    Each upstream sample is tokenized (with truncation to `context_len`) and yielded
+    as a standalone sequence so the collator can pad within the batch.
+    """
+
+    def __init__(
+        self,
+        dataset: IterableDataset,
+        tokenizer: PreTrainedTokenizer,
+        context_len: int,
+        rank: int = 0,
+        world_size: int = 1,
+    ) -> None:
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.context_len = context_len
+        self.rank = rank
+        self.world_size = world_size
+        self.data = dataset.shard(world_size, rank)
+        self.states = None
+
+    def __iter__(self):
+        if self.states is not None:
+            self.data.load_state_dict(self.states)
+
+        for sample in self.tokenize(self.data):
+            yield {'input_ids': torch.tensor(sample, dtype=torch.long)}
+
+    def tokenize(self, data, buffer_size: int = 64):
+        buffer, states = [], []
+        for sample in data:
+            if sample.get('text', None) is not None:
+                buffer.append(sample['text'])
+            elif sample.get('content', None) is not None:
+                buffer.append(sample['content'])
+            else:
+                raise ValueError(f"No 'text' or 'content' field found in sample:\n{sample}")
+            states.append(self.data.state_dict())
+            if len(buffer) == buffer_size:
+                tokenized = self.tokenizer(
+                    buffer,
+                    truncation=True,
+                    padding=True,
+                    max_length=self.context_len,
+                    return_attention_mask=False,
+                    padding_side="right",
+                )['input_ids']
+                for s, ids in zip(states, tokenized):
+                    self.states = s
+                    yield ids
+                buffer, states = [], []
+
+        if len(buffer) > 0:
+            tokenized = self.tokenizer(
+                buffer,
+                truncation=True,
+                padding=True,
+                max_length=self.context_len,
+                return_attention_mask=False,
+                padding_side="right",
+            )['input_ids']
+            for s, ids in zip(states, tokenized):
+                self.states = s
+                yield ids
+
+    def state_dict(self):
+        return {'states': self.states}
+
+    def load_state_dict(self, state_dict):
+        self.states = state_dict.get('states')
+        if self.states is not None:
+            self.data.load_state_dict(self.states)
+
+
 def build_dataloader(
     dataset: IterableDataset,
     tokenizer: PreTrainedTokenizer,
@@ -554,15 +631,33 @@ def build_dataloader(
     pin_memory: bool = False,
     persistent_workers: bool = False,
     snapshot_every_n_steps: Optional[int] = 1,
+    dataset_mode: str = "pretrain",
 ):
-    dataset = OnlineTokenizedIterableDataset(
-        dataset=dataset, tokenizer=tokenizer, seq_len=seq_len, rank=rank, world_size=world_size
-    )
+    dataset_mode = dataset_mode.lower()
+    if dataset_mode not in {"pretrain", "finetune"}:
+        raise ValueError(f"Unsupported dataset_mode '{dataset_mode}'. Expected 'pretrain' or 'finetune'.")
+
+    if dataset_mode == "pretrain":
+        dataset = OnlineTokenizedIterableDataset(
+            dataset=dataset, tokenizer=tokenizer, seq_len=seq_len, rank=rank, world_size=world_size
+        )
+    else:
+        effective_context = context_len or seq_len
+        if effective_context is None:
+            raise ValueError("context_len or seq_len must be provided for finetune mode.")
+        dataset = FinetuneIterableDataset(
+            dataset=dataset,
+            tokenizer=tokenizer,
+            context_len=effective_context,
+            rank=rank,
+            world_size=world_size,
+        )
+
     return ParallelAwareDataLoader(
         rank=rank,
         dataset=dataset,
         batch_size=batch_size,
-        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, context_len=context_len, varlen=varlen),
+        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, context_len=context_len, varlen=varlen, padding_side="left" if dataset_mode == "pretrain" else "right"),
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,

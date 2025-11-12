@@ -149,6 +149,7 @@ By default, the learning rate is set to 3e-4 with a cosine scheduler. Other sche
 - `--training.seq_len`: The length of each sequence in the batch, which is concatenated from multiple samples.
 - `--training.context_len`: The max allowed length of a sample. For non-varlen mode, this is equivalent to `seq_len`.
 - `--training.varlen`: Whether to conduct variable-length sequence training.
+- `--training.dataset_mode`: Choose `pretrain` (default) to stream fixed-length chunks or `finetune` to keep per-example sequences and pad within the batch.
 - `--training.gradient_accumulation_steps`: Number of gradient accumulation steps.
 
 > [!WARNING]

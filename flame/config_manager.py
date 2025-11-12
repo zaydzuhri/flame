@@ -269,6 +269,22 @@ class JobConfig:
             help="Whether to take sequences of variable length as input",
         )
         self.parser.add_argument(
+            "--training.dataset_mode",
+            type=str,
+            choices=["pretrain", "finetune"],
+            default="pretrain",
+            help=(
+                "Controls how the dataloader chunks text. "
+                "'pretrain' streams fixed-length blocks, 'finetune' keeps per-example boundaries."
+            ),
+        )
+        self.parser.add_argument(
+            "--training.force_unk_as_pad",
+            action="store_true",
+            help="Whether to force <unk> as pad token",
+            default=False,
+        )
+        self.parser.add_argument(
             "--training.gradient_accumulation_steps",
             type=int,
             default=1,

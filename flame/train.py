@@ -173,6 +173,12 @@ def main(job_config: JobConfig):
         trust_remote_code=True,
         model_max_length=int(1e10),
     )
+    is_finetune = getattr(job_config.training, "dataset_mode", "pretrain") == "finetune"
+    if not hasattr(tokenizer, "pad_token") and is_finetune:
+        if job_config.training.force_unk_as_pad:
+            tokenizer.pad_token = "<unk>"
+        else:
+            raise ValueError("Tokenizer does not have a pad token")
     logger.info(f"{tokenizer}")
     logger.info(
         f"Loading dataset {job_config.training.dataset}"
@@ -367,6 +373,11 @@ def main(job_config: JobConfig):
     model_config = AutoConfig.from_pretrained(job_config.model.config)
 
     logger.info("Building dataloader...")
+    if job_config.training.dataset_mode.lower() == "pretrain":
+        dataloader_seq_len = job_config.training.seq_len * 2
+    else:
+        dataloader_seq_len = job_config.training.context_len or job_config.training.seq_len
+
     dataloader = build_dataloader(
         dataset=dataset,
         tokenizer=tokenizer,
@@ -375,13 +386,14 @@ def main(job_config: JobConfig):
         batch_size=job_config.training.batch_size,
         # TODO: Make this more modular
         # seq_len=job_config.training.seq_len if not model_config.use_top_loss else job_config.training.seq_len*2,
-        seq_len=job_config.training.seq_len * 2,
+        seq_len=dataloader_seq_len,
         context_len=job_config.training.context_len,
         varlen=job_config.training.varlen,
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
         snapshot_every_n_steps=job_config.checkpoint.interval,
+        dataset_mode=job_config.training.dataset_mode,
     )
 
     # set the model configs from training inputs:

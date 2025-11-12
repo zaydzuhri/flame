@@ -26,6 +26,7 @@ persistent_workers = false
 prefetch_factor = 2
 seed = 42
 varlen = false
+dataset_mode = "pretrain"
 
 [optimizer]
 name = "AdamW"
