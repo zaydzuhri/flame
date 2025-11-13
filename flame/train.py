@@ -174,11 +174,12 @@ def main(job_config: JobConfig):
         model_max_length=int(1e10),
     )
     is_finetune = getattr(job_config.training, "dataset_mode", "pretrain") == "finetune"
-    if not hasattr(tokenizer, "pad_token") and is_finetune:
-        if job_config.training.force_unk_as_pad:
-            tokenizer.pad_token = "<unk>"
-        else:
-            raise ValueError("Tokenizer does not have a pad token")
+    if is_finetune:
+        if not hasattr(tokenizer, "pad_token"):
+            if job_config.training.force_unk_as_pad:
+                tokenizer.pad_token = "<unk>"
+            else:
+                raise ValueError("Tokenizer does not have a pad token")
     logger.info(f"{tokenizer}")
     logger.info(
         f"Loading dataset {job_config.training.dataset}"
