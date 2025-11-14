@@ -562,7 +562,7 @@ class FinetuneIterableDataset(IterableDataset):
         self.context_len = context_len
         self.rank = rank
         self.world_size = world_size
-        self.data = dataset.shard(world_size, rank)
+        self.data = dataset.shard(world_size, rank).repeat(None)
         self.states = None
 
     def __iter__(self):
