@@ -2,7 +2,7 @@
     "attention_bias": false,
     "bos_token_id": 1,
     "eos_token_id": 2,
-    "fuse_cross_entropy": false,
+    "fuse_cross_entropy": true,
     "fuse_norm": true,
     "hidden_act": "swish",
     "hidden_size": 1024,
