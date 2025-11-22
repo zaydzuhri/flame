@@ -39,6 +39,7 @@ setup(
         'torch==2.6',
         'torchdata',
         'transformers==4.51.3',
+        'peft==3.6.0',
         'triton>=3.0',
         'datasets>=3.3.0',
         'einops',
