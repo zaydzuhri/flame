@@ -482,6 +482,92 @@ class JobConfig:
             action="store_true",
             help="Whether to log metrics to Weights & Biases",
         )
+        # sink rate monitor configs
+        self.parser.add_argument(
+            "--sink_monitor.threshold",
+            type=float,
+            default=None,
+            help="Sink rate threshold (0-1) to trigger softpick adjustments. Leave unset to disable monitoring.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.low_watermark",
+            type=float,
+            default=None,
+            help="Sink rate value that turns the monitor back toward softmax. Defaults to half the threshold.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.check_interval",
+            type=int,
+            default=0,
+            help="How often (in steps) to evaluate sink rate. Set to 0 to disable.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.epsilon",
+            type=float,
+            default=0.3,
+            help="Epsilon threshold used when calculating sink rate.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.eval_batch_size",
+            type=int,
+            default=1,
+            help="Number of sequences per sink rate evaluation microbatch.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.eval_seq_len",
+            type=int,
+            default=512,
+            help="Sequence length cap for sink rate evaluation. Non-positive values use training.seq_len.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.eval_batches",
+            type=int,
+            default=1,
+            help="Maximum number of microbatches to use per sink rate check.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.slow_softmax_impl",
+            type=str,
+            default="naive_attn",
+            help="Attention implementation used to collect attentions in softmax mode.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.slow_softpick_impl",
+            type=str,
+            default="naive_softpick_attn",
+            help="Attention implementation used to collect attentions in softpick mode.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.strategy",
+            type=str,
+            default="hard_switch",
+            choices=["hard_switch", "stochastic"],
+            help="How to adjust softpick probability when threshold is crossed.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.prob_step",
+            type=float,
+            default=0.1,
+            help="Adjustment step for softpick probability in stochastic mode.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.min_prob",
+            type=float,
+            default=0.0,
+            help="Lower bound for stochastic softpick probability.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.max_prob",
+            type=float,
+            default=1.0,
+            help="Upper bound for stochastic softpick probability.",
+        )
+        self.parser.add_argument(
+            "--sink_monitor.eval_softpick_when_p_ge",
+            type=float,
+            default=0.5,
+            help="Use softpick evaluation path when current probability is above this value.",
+        )
 
         self.parser.add_argument(
             "--experimental.enable_async_tensor_parallel",

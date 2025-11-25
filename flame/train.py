@@ -26,6 +26,7 @@ from flame.tools.utils import get_nparams_and_flops
 from flame.utils.checkpoint import cleanup_local_checkpoints
 from flame.utils.convert_dcp_to_hf import save_pretrained
 from flame.utils.hf_utils import upload_checkpoint_to_hf
+from flame.utils.sink_rate import SinkMonitorConfig, SinkRateMonitor
 from datetime import datetime
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
@@ -537,6 +538,55 @@ def main(job_config: JobConfig):
         job_config.experimental.enable_compiled_autograd,
     )
 
+    sink_monitor = None
+    sink_metrics = {}
+    sink_metrics_step = -1
+    if job_config.sink_monitor.threshold is not None and job_config.sink_monitor.check_interval > 0:
+        low_watermark = (
+            job_config.sink_monitor.low_watermark
+            if job_config.sink_monitor.low_watermark is not None
+            else job_config.sink_monitor.threshold / 2
+        )
+        eval_seq_len = job_config.sink_monitor.eval_seq_len
+        if eval_seq_len <= 0:
+            eval_seq_len = job_config.training.seq_len
+        eval_seq_len = min(eval_seq_len, job_config.training.seq_len)
+        sink_monitor_config = SinkMonitorConfig(
+            threshold=job_config.sink_monitor.threshold,
+            low_watermark=low_watermark,
+            check_interval=job_config.sink_monitor.check_interval,
+            epsilon=job_config.sink_monitor.epsilon,
+            eval_batch_size=job_config.sink_monitor.eval_batch_size,
+            eval_seq_len=eval_seq_len,
+            eval_batches=job_config.sink_monitor.eval_batches,
+            slow_softmax_impl=job_config.sink_monitor.slow_softmax_impl,
+            slow_softpick_impl=job_config.sink_monitor.slow_softpick_impl,
+            strategy=job_config.sink_monitor.strategy,
+            prob_step=job_config.sink_monitor.prob_step,
+            min_prob=job_config.sink_monitor.min_prob,
+            max_prob=job_config.sink_monitor.max_prob,
+            eval_softpick_threshold=job_config.sink_monitor.eval_softpick_when_p_ge,
+        )
+        if not 0.0 <= sink_monitor_config.threshold <= 1.0:
+            raise ValueError("sink_monitor.threshold must be between 0 and 1")
+        if not 0.0 <= sink_monitor_config.low_watermark <= 1.0:
+            raise ValueError("sink_monitor.low_watermark must be between 0 and 1")
+        if sink_monitor_config.low_watermark > sink_monitor_config.threshold:
+            logger.warning(
+                "sink_monitor.low_watermark is above sink_monitor.threshold. Using threshold value instead."
+            )
+            sink_monitor_config.low_watermark = sink_monitor_config.threshold
+        sink_monitor_config.min_prob = max(0.0, min(1.0, sink_monitor_config.min_prob))
+        sink_monitor_config.max_prob = max(
+            sink_monitor_config.min_prob, min(1.0, sink_monitor_config.max_prob)
+        )
+        sink_monitor = SinkRateMonitor(sink_monitor_config)
+        logger.info(
+            f"Sink rate monitor enabled (threshold={sink_monitor_config.threshold}, "
+            f"low_watermark={sink_monitor_config.low_watermark}, "
+            f"interval={sink_monitor_config.check_interval}, strategy={sink_monitor_config.strategy})"
+        )
+
     # variables used to keep info for metrics logging
     device_memory_monitor.reset_peak_stats()
 
@@ -707,6 +757,28 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
+            if sink_monitor and sink_monitor.should_run(train_state.step):
+                if "cu_seqlens" in batch:
+                    logger.warning(
+                        "Sink rate monitor skipped for varlen batch containing cu_seqlens; not supported yet."
+                    )
+                else:
+                    sink_result = sink_monitor.evaluate_and_update(model_parts, batch)
+                    if sink_result is not None:
+                        sink_rate, new_prob, use_softpick_eval = sink_result
+                        sink_metrics = {
+                            "sink_rate/value": sink_rate,
+                            "sink_rate/use_softpick_eval": float(use_softpick_eval),
+                        }
+                        if new_prob is not None:
+                            sink_metrics["sink_rate/softpick_p"] = new_prob
+                        sink_metrics_step = train_state.step
+                        logger.info(
+                            f"{color.green}Sink rate: {sink_rate:.4f} "
+                            f"{color.blue}softpick_p: "
+                            f"{new_prob if new_prob is not None else 'unchanged'}{color.reset}"
+                        )
+
             # log metrics - Use MetricsProcessor
             if metric_logger.should_log(train_state.step):
                 if (
@@ -752,15 +824,18 @@ def main(job_config: JobConfig):
                     * (job_config.training.steps - train_state.step)
                     / train_state.step
                 )
+                extra_metrics = {
+                    "optimizer/lr": last_lr,
+                    "optimizer/grad_norm": grad_norm.item(),
+                    "optimizer/skipped_step": train_state.skipped_step,
+                }
+                if sink_metrics_step == train_state.step and sink_metrics:
+                    extra_metrics.update(sink_metrics)
                 metric_logger.log(
                     train_state.step,
                     global_avg_loss,
                     global_max_loss,
-                    extra_metrics={
-                        "optimizer/lr": last_lr,
-                        "optimizer/grad_norm": grad_norm.item(),
-                        "optimizer/skipped_step": train_state.skipped_step,
-                    },
+                    extra_metrics=extra_metrics,
                 )
 
                 logger.info(
