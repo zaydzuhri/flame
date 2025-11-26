@@ -4,7 +4,7 @@
 	branch = feat/stochastic-softpick-attention
 [submodule "3rdparty/torchtitan"]
 	path = 3rdparty/torchtitan
-	url = https://github.com/pytorch/torchtitan.git
+	url = https://github.com/Erland366/torchtitan.git
 [submodule "3rdparty/lm-evaluation-harness"]
 	path = 3rdparty/lm-evaluation-harness
 	url = https://github.com/EleutherAI/lm-evaluation-harness

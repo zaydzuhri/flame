@@ -1,0 +1,38 @@
+Model: zaydzuhri/vanilla-340M-4096-model
+Dataset: wikitext (Config: wikitext-2-raw-v1, Split: test)
+Samples Processed: 4 / Requested: 4
+Epsilon: 0.3
+Max Length: 512
+Batch Size: 1
+Device: cuda
+Attn Impl (Fast): parallel_attn
+Attn Impl (Slow/Output): naive_attn
+Switching Active: True
+
+--- Per-Layer Sink Rates ---
+Layer 00: 0.7031
+Layer 01: 0.7031
+Layer 02: 0.7344
+Layer 03: 0.7500
+Layer 04: 0.7500
+Layer 05: 0.7344
+Layer 06: 0.7500
+Layer 07: 1.0000
+Layer 08: 0.9844
+Layer 09: 1.0000
+Layer 10: 0.9844
+Layer 11: 0.9688
+Layer 12: 0.9844
+Layer 13: 1.0000
+Layer 14: 0.9688
+Layer 15: 0.9844
+Layer 16: 1.0000
+Layer 17: 1.0000
+Layer 18: 1.0000
+Layer 19: 0.9688
+Layer 20: 1.0000
+Layer 21: 1.0000
+Layer 22: 1.0000
+Layer 23: 0.9375
+
+Overall Average Sink Rate: 0.9128

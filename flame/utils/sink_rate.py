@@ -202,11 +202,11 @@ class SinkRateMonitor:
         return 0.0
 
     def _iter_eval_batches(self, batch: Dict[str, torch.Tensor]) -> Iterable[Dict[str, torch.Tensor]]:
-        input_ids = batch.get("input_ids")
+        input_ids = batch.get("input_ids").to("cuda")
         if input_ids is None:
             return
 
-        attention_mask = batch.get("attention_mask")
+        attention_mask = batch.get("attention_mask").to("cuda")
         total_sequences = input_ids.size(0)
         max_batches = min(
             self.config.eval_batches,
