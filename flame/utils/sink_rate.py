@@ -95,9 +95,33 @@ def _temporary_attention_overrides(
                 module.attn_impl = attn_impl
 
 
+def _unwrap_module(module: torch.nn.Module) -> torch.nn.Module:
+    """
+    Best-effort unwrap for common wrappers: torch.compile, DDP, FSDP (composable and class-based).
+    """
+    seen = set()
+    cur = module
+    while True:
+        if id(cur) in seen:
+            break
+        seen.add(id(cur))
+        if hasattr(cur, "_orig_mod"):
+            cur = getattr(cur, "_orig_mod")
+            continue
+        if hasattr(cur, "_fsdp_wrapped_module"):
+            cur = getattr(cur, "_fsdp_wrapped_module")
+            continue
+        if hasattr(cur, "module"):
+            cur = getattr(cur, "module")
+            continue
+        break
+    return cur
+
+
 def _iter_attention_modules(model_parts: List[torch.nn.Module]):
     for model in model_parts:
-        for module in model.modules():
+        root = _unwrap_module(model)
+        for module in root.modules():
             if hasattr(module, "attn_impl"):
                 yield module
 
@@ -127,11 +151,11 @@ class SinkRateMonitor:
             logger.warning("SinkRateMonitor: no evaluation data available from batch")
             return None
 
-        model = model_parts[0]
-        was_training = model.training
-        model.eval()
+        eval_model = _unwrap_module(model_parts[0])
+        was_training = eval_model.training
+        eval_model.eval()
 
-        current_prob = self._get_current_probability(model_parts)
+        current_prob = self._get_current_probability([eval_model])
         use_softpick_eval = current_prob >= self.config.eval_softpick_threshold
         slow_softmax_impl = (
             self.config.slow_softpick_impl if use_softpick_eval else self.config.slow_softmax_impl
@@ -140,14 +164,14 @@ class SinkRateMonitor:
         sink_rates: List[float] = []
         try:
             with _temporary_attention_overrides(
-                model_parts,
+                [eval_model],
                 slow_softmax_impl=slow_softmax_impl,
                 slow_softpick_impl=self.config.slow_softpick_impl,
                 force_softpick=use_softpick_eval,
             ):
                 for eval_batch in eval_batches:
                     with torch.no_grad():
-                        outputs = model(
+                        outputs = eval_model(
                             input_ids=eval_batch["input_ids"],
                             attention_mask=eval_batch.get("attention_mask"),
                             output_attentions=True,
@@ -158,7 +182,7 @@ class SinkRateMonitor:
                     sink_rates.append(calculate_sink_rate(outputs.attentions, self.config.epsilon))
         finally:
             if was_training:
-                model.train()
+                eval_model.train()
 
         if not sink_rates:
             logger.warning("SinkRateMonitor: no attention maps returned during evaluation")
@@ -169,7 +193,7 @@ class SinkRateMonitor:
 
         new_prob = self._compute_new_probability(current_prob, sink_rate)
         if new_prob is not None:
-            self._apply_probability(model_parts, new_prob)
+            self._apply_probability([eval_model], new_prob)
         return sink_rate, new_prob, use_softpick_eval
 
     def _compute_new_probability(self, current_prob: float, sink_rate: float) -> Optional[float]:
@@ -202,11 +226,11 @@ class SinkRateMonitor:
         return 0.0
 
     def _iter_eval_batches(self, batch: Dict[str, torch.Tensor]) -> Iterable[Dict[str, torch.Tensor]]:
-        input_ids = batch.get("input_ids").to("cuda")
+        input_ids = batch.get("input_ids")
         if input_ids is None:
             return
 
-        attention_mask = batch.get("attention_mask").to("cuda")
+        attention_mask = batch.get("attention_mask")
         total_sequences = input_ids.size(0)
         max_batches = min(
             self.config.eval_batches,
