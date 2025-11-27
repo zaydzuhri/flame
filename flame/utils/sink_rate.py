@@ -49,7 +49,6 @@ class SinkMonitorConfig:
     prob_step: float
     min_prob: float
     max_prob: float
-    eval_softpick_threshold: float
 
 
 @contextmanager
@@ -130,6 +129,10 @@ class SinkRateMonitor:
     def __init__(self, config: SinkMonitorConfig):
         self.config = config
 
+    def initialize_probability(self, model_parts: List[torch.nn.Module]) -> None:
+        """Force the training start in softmax mode (min_prob)."""
+        self._apply_probability(model_parts, self.config.min_prob)
+
     def should_run(self, step: int) -> bool:
         return (
             self.config.threshold is not None
@@ -141,31 +144,34 @@ class SinkRateMonitor:
         self,
         model_parts: List[torch.nn.Module],
         batch: Dict[str, torch.Tensor],
-    ) -> Optional[Tuple[float, Optional[float], bool]]:
+    ) -> Optional[Tuple[float, Optional[float], bool, str]]:
         if not model_parts:
             logger.warning("SinkRateMonitor: no model parts provided for evaluation")
-            return None
-
-        eval_batches = list(self._iter_eval_batches(batch))
-        if not eval_batches:
-            logger.warning("SinkRateMonitor: no evaluation data available from batch")
             return None
 
         eval_model = _unwrap_module(model_parts[0])
         was_training = eval_model.training
         eval_model.eval()
+        eval_device = next(eval_model.parameters()).device
+        eval_batches = list(self._iter_eval_batches(batch, eval_device))
 
-        current_prob = self._get_current_probability([eval_model])
-        use_softpick_eval = current_prob >= self.config.eval_softpick_threshold
-        slow_softmax_impl = (
-            self.config.slow_softpick_impl if use_softpick_eval else self.config.slow_softmax_impl
+        if not eval_batches:
+            logger.warning("SinkRateMonitor: no evaluation data available from batch")
+            return None
+
+        # Evaluate sink rate with softmax (naive) to match sink_rate_per_layer.py behavior
+        use_softpick_eval = False
+        slow_eval_impl = self.config.slow_softmax_impl
+        logger.info(
+            f"SinkRateMonitor eval using {'softpick' if use_softpick_eval else 'softmax'} "
+            f"impl: {slow_eval_impl}"
         )
 
         sink_rates: List[float] = []
         try:
             with _temporary_attention_overrides(
                 [eval_model],
-                slow_softmax_impl=slow_softmax_impl,
+                slow_softmax_impl=slow_eval_impl,
                 slow_softpick_impl=self.config.slow_softpick_impl,
                 force_softpick=use_softpick_eval,
             ):
@@ -191,10 +197,12 @@ class SinkRateMonitor:
         sink_rate = sum(sink_rates) / len(sink_rates)
         sink_rate = self._distributed_average(sink_rate, device=eval_batches[0]["input_ids"].device)
 
+        current_prob = self._get_current_probability([eval_model])
         new_prob = self._compute_new_probability(current_prob, sink_rate)
         if new_prob is not None:
             self._apply_probability([eval_model], new_prob)
-        return sink_rate, new_prob, use_softpick_eval
+
+        return sink_rate, new_prob, use_softpick_eval, slow_eval_impl
 
     def _compute_new_probability(self, current_prob: float, sink_rate: float) -> Optional[float]:
         if sink_rate >= self.config.threshold:
@@ -225,12 +233,17 @@ class SinkRateMonitor:
                 return module.stochastic_value
         return 0.0
 
-    def _iter_eval_batches(self, batch: Dict[str, torch.Tensor]) -> Iterable[Dict[str, torch.Tensor]]:
+    def _iter_eval_batches(
+        self, batch: Dict[str, torch.Tensor], device: torch.device
+    ) -> Iterable[Dict[str, torch.Tensor]]:
         input_ids = batch.get("input_ids")
         if input_ids is None:
             return
+        input_ids = input_ids.to(device)
 
         attention_mask = batch.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
         total_sequences = input_ids.size(0)
         max_batches = min(
             self.config.eval_batches,

@@ -562,12 +562,6 @@ class JobConfig:
             default=1.0,
             help="Upper bound for stochastic softpick probability.",
         )
-        self.parser.add_argument(
-            "--sink_monitor.eval_softpick_when_p_ge",
-            type=float,
-            default=0.5,
-            help="Use softpick evaluation path when current probability is above this value.",
-        )
 
         self.parser.add_argument(
             "--experimental.enable_async_tensor_parallel",

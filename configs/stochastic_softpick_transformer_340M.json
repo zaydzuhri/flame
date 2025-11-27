@@ -16,5 +16,5 @@
     "use_cache": true,
     "vocab_size": 32000,
     "attn_impl": "parallel_softpick_attn",
-    "stochastic_p": 0.7
+    "stochastic_p": 0.0
 }

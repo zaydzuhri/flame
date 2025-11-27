@@ -565,7 +565,6 @@ def main(job_config: JobConfig):
             prob_step=job_config.sink_monitor.prob_step,
             min_prob=job_config.sink_monitor.min_prob,
             max_prob=job_config.sink_monitor.max_prob,
-            eval_softpick_threshold=job_config.sink_monitor.eval_softpick_when_p_ge,
         )
         if not 0.0 <= sink_monitor_config.threshold <= 1.0:
             raise ValueError("sink_monitor.threshold must be between 0 and 1")
@@ -581,6 +580,7 @@ def main(job_config: JobConfig):
             sink_monitor_config.min_prob, min(1.0, sink_monitor_config.max_prob)
         )
         sink_monitor = SinkRateMonitor(sink_monitor_config)
+        sink_monitor.initialize_probability(model_parts)
         logger.info(
             f"Sink rate monitor enabled (threshold={sink_monitor_config.threshold}, "
             f"low_watermark={sink_monitor_config.low_watermark}, "
@@ -765,7 +765,7 @@ def main(job_config: JobConfig):
                 else:
                     sink_result = sink_monitor.evaluate_and_update(model_parts, batch)
                     if sink_result is not None:
-                        sink_rate, new_prob, use_softpick_eval = sink_result
+                        sink_rate, new_prob, use_softpick_eval, eval_impl = sink_result
                         sink_metrics = {
                             "sink_rate/value": sink_rate,
                             "sink_rate/use_softpick_eval": float(use_softpick_eval),
@@ -774,7 +774,7 @@ def main(job_config: JobConfig):
                             sink_metrics["sink_rate/softpick_p"] = new_prob
                         sink_metrics_step = train_state.step
                         logger.info(
-                            f"{color.green}Sink rate: {sink_rate:.4f} "
+                            f"{color.green}Sink rate ({eval_impl}): {sink_rate:.4f} "
                             f"{color.blue}softpick_p: "
                             f"{new_prob if new_prob is not None else 'unchanged'}{color.reset}"
                         )
