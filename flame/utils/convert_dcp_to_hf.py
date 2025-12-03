@@ -35,7 +35,8 @@ def save_pretrained(
     tokenizer.save_pretrained(path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        checkpoint = os.path.join(path, f'checkpoint/step-{step}')
+        base_checkpoint_dir = os.path.dirname(path)
+        checkpoint = os.path.join(base_checkpoint_dir, f'checkpoint/step-{step}')
         checkpoint_path = os.path.join(tmpdir, 'checkpoint.pt')
         logger.info(f"Saving the distributed checkpoint to {checkpoint_path}")
         dcp_to_torch_save(checkpoint, checkpoint_path)
