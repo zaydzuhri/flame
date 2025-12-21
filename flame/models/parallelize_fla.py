@@ -237,7 +237,14 @@ class GLATPPlan(TPPlan):
         }
 
 
-TP_PLAN_MAP = {"transformer": TransformerTPPlan, "gla": GLATPPlan}
+TP_PLAN_MAP = {
+    "transformer": TransformerTPPlan,
+    "relu_softpick_1_transformer": TransformerTPPlan,
+    "relu_softpick_2_transformer": TransformerTPPlan,
+    "abs_softmax_1_transformer": TransformerTPPlan,
+    "abs_softmax_2_transformer": TransformerTPPlan,
+    "gla": GLATPPlan,
+}
 
 
 def apply_tp(
