@@ -1,0 +1,67 @@
+[model]
+config = "fla-hub/transformer-1.3B-100B"
+tokenizer_path = "fla-hub/transformer-1.3B-100B"
+
+[job]
+dump_folder = "exp"
+print_args = true
+
+[training]
+batch_size = 32
+seq_len = 2048
+context_len = 2048
+gradient_accumulation_steps = 1
+steps = 20480
+max_norm = 1.0
+skip_nan_inf = true
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+compile = false
+dataset = "HuggingFaceFW/fineweb-edu"
+dataset_name = "default"
+num_workers = 32
+pin_memory = false
+persistent_workers = false
+prefetch_factor = 2
+seed = 42
+varlen = false
+
+[optimizer]
+name = "AdamW"
+eps = 1e-15
+lr = 3e-4
+
+[lr_scheduler]
+warmup_steps = 1024
+decay_type = "cosine"
+lr_min = 0.1
+
+[checkpoint]
+enable_checkpoint = true
+folder = "checkpoint"
+interval_type = "steps"
+interval = 2048
+model_weights_only = false
+export_dtype = "float32"
+async_mode = "disabled"    # ["disabled", "async", "async_with_pinned_mem"]
+
+[profiling]
+enable_profiling = true
+save_traces_folder = "profile_trace"
+profile_freq = 512
+
+[metrics]
+log_freq = 32
+enable_wandb = false
+
+[experimental]
+context_parallel_degree = 1
+pipeline_parallel_degree = 1
+
+[float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+
+[activation_checkpoint]
+mode = "none"
