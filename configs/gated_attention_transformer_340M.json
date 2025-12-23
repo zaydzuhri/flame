@@ -15,6 +15,6 @@
     "tie_word_embeddings": false,
     "use_cache": true,
     "vocab_size": 32000,
-    "attn_impl": "gated_attn",
+    "attn_impl": "parallel_gated_attn",
     "elementwise_gate": true
 }
