@@ -7,6 +7,7 @@ from fla.ops.attn import (
     parallel_relu_softpick_2_attn,
     parallel_abs_softmax_1_attn,
     parallel_abs_softmax_2_attn,
+    parallel_softmax_plus_one_attn,
 )
 from fla.ops.attn.naive_softpick import naive_softpick_attn
 from fla.ops.attn.naive_relusoftpick import (
@@ -17,6 +18,7 @@ from fla.ops.attn.naive_abs_softmax import (
     reference_naive_abs_softmax_1_attn,
     reference_naive_abs_softmax_2_attn,
 )
+from fla.ops.attn.naive_softmax_plus_one import reference_naive_softmax_plus_one_attn
 
 
 VARIANTS = [
@@ -25,6 +27,7 @@ VARIANTS = [
     ("relu_softpick_2", parallel_relu_softpick_2_attn, reference_naive_relu_softpick_2_attn),
     ("abs_softmax_1", parallel_abs_softmax_1_attn, reference_naive_abs_softmax_1_attn),
     ("abs_softmax_2", parallel_abs_softmax_2_attn, reference_naive_abs_softmax_2_attn),
+    ("softmax_plus_one", parallel_softmax_plus_one_attn, reference_naive_softmax_plus_one_attn),
 ]
 
 SHAPES = [

@@ -2,18 +2,18 @@
     "attention_bias": false,
     "bos_token_id": 1,
     "eos_token_id": 2,
-    "fuse_cross_entropy": false,
-    "fuse_norm": false,
+    "fuse_cross_entropy": true,
+    "fuse_norm": true,
     "hidden_act": "swish",
     "hidden_size": 1024,
     "initializer_range": 0.006,
     "max_position_embeddings": 8192,
-    "model_type": "abs_softmax_1_transformer",
+    "model_type": "softmax_plus_one_transformer",
     "num_heads": 16,
     "num_hidden_layers": 24,
     "norm_eps": 1e-06,
     "tie_word_embeddings": false,
     "use_cache": true,
     "vocab_size": 32000,
-    "attn_impl": "parallel_abs_softmax_1_attn"
+    "attn_impl": "parallel_softmax_plus_one_attn"
 }
