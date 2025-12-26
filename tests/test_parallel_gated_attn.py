@@ -20,10 +20,10 @@ SHAPES = [
 
 def _tolerances(dtype: torch.dtype):
     if dtype == torch.bfloat16:
-        return 2e-2, 2e-2
+        return 2e-5, 2e-5
     if dtype == torch.float16:
-        return 1e-2, 1e-2
-    return 2e-3, 2e-3
+        return 1e-5, 1e-5
+    return 2e-5, 2e-5
 
 
 @pytest.mark.parametrize("shape", SHAPES)
@@ -46,12 +46,13 @@ def test_parallel_gated_attn_shape_and_dtype(shape, dtype: torch.dtype):
     assert o.dtype == q.dtype, f"Expected output dtype {q.dtype}, got {o.dtype}"
 
 
-def test_parallel_gated_attn_matches_naive():
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+def test_parallel_gated_attn_matches_naive(dtype: torch.dtype):
     device = torch.device("cuda")
     b, t, h, d = 2, 13, 3, 16
     torch.manual_seed(42)
 
-    q = torch.randn(b, t, h, d, device=device, dtype=torch.float32)
+    q = torch.randn(b, t, h, d, device=device, dtype=dtype)
     k = torch.randn_like(q)
     v = torch.randn_like(q)
     gate_score = torch.randn_like(q)
@@ -59,5 +60,5 @@ def test_parallel_gated_attn_matches_naive():
     o_parallel = parallel_gated_attn(q, k, v, gate_score=gate_score, head_first=False)
     o_naive, _ = naive_gated_attn(q, k, v, gate_score=gate_score, head_first=False)
 
-    rtol, atol = _tolerances(torch.float32)
+    rtol, atol = _tolerances(dtype)
     torch.testing.assert_close(o_parallel, o_naive, rtol=rtol, atol=atol)
