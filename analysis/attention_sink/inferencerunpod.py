@@ -462,7 +462,7 @@ def main() -> None:
         ):
             raise RuntimeError(
                 "Model returned no attentions. Use --attn-impl naive_attn (or another "
-                "naive_* impl) to enable attention outputs."
+                "naive_* impl), or gpt_oss_naive_sink for GPT-OSS sink checkpoints."
             )
 
         if args.print_hidden_stats and output.hidden_states is not None:

@@ -98,6 +98,18 @@ python analysis/attention_sink/inferencerunpod.py \
   --save-dir analysis/attention_sink/outputs
 ```
 
+Run a forward pass for GPT-OSS sink checkpoints with the naive sink attention:
+
+```bash
+python analysis/attention_sink/inferencerunpod.py \
+  --model analysis/attention_sink/hf_models/gpt_oss_sink-340M-4096-step-10000 \
+  --mode forward \
+  --attn-impl gpt_oss_naive_sink \
+  --plot-attn-grid \
+  --plot-hidden-hist \
+  --save-dir analysis/attention_sink/outputs
+```
+
 Measure sink rate, hidden activation stats, and lower-triangle sparsity:
 
 ```bash
