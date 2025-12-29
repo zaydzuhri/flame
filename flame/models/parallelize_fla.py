@@ -237,6 +237,27 @@ class GLATPPlan(TPPlan):
         }
 
 
+class KDATPPlan(TPPlan):
+
+    @property
+    def attn_plan(self):
+        return {
+            "attn": self.prepare_module_input(
+                input_kwarg_layouts={"hidden_states": Shard(1)},
+                desired_input_kwarg_layouts={"hidden_states": Replicate()},
+            ),
+            "attn.q_proj": self.colwise_parallel(),
+            "attn.k_proj": self.colwise_parallel(),
+            "attn.v_proj": self.colwise_parallel(),
+            "attn.f_proj.0": self.colwise_parallel(),
+            "attn.f_proj.1": self.colwise_parallel(),
+            "attn.b_proj": self.colwise_parallel(),
+            "attn.g_proj.0": self.colwise_parallel(),
+            "attn.g_proj.1": self.colwise_parallel(),
+            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1)),
+        }
+
+
 TP_PLAN_MAP = {
     "transformer": TransformerTPPlan,
     "relu_softpick_1_transformer": TransformerTPPlan,
@@ -244,6 +265,7 @@ TP_PLAN_MAP = {
     "abs_softmax_1_transformer": TransformerTPPlan,
     "abs_softmax_2_transformer": TransformerTPPlan,
     "gla": GLATPPlan,
+    "kda" : KDATPPlan
 }
 
 
