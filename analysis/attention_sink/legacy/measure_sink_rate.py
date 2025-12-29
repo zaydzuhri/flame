@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import argparse
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from datasets import load_dataset
 
 def calculate_sink_rate(attention_maps, epsilon=0.3):
@@ -60,10 +60,18 @@ def main(args):
     # Load model and tokenizer
     print(f"Loading model: {args.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    model = AutoModelForCausalLM.from_pretrained(args.model_name, return_dict_in_generate=True, output_attentions=True).half()
+    config = AutoConfig.from_pretrained(
+        args.model_name
+    )
+    config.output_attentions = False
+    config.output_hidden_states = False
+    config.return_dict_in_generate = True
+    config.attn_impl = "naive_attn"
+
+    model = AutoModelForCausalLM.from_pretrained(args.model_name, config=config).half()
     model.to(device)
     model.eval()
-    
+
     # Add padding token if it doesn't exist
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -97,7 +105,13 @@ def main(args):
         
         # Forward pass
         with torch.no_grad():
-            outputs = model(**encodings)
+            outputs = model(
+                **encodings,
+                output_attentions=True,
+                output_hidden_states=True,
+                return_dict=True,
+                use_cache=False,
+            )
         
         # Calculate sink rate for this batch
         batch_sink_rate = calculate_sink_rate(outputs.attentions, args.epsilon)

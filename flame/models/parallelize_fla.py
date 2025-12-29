@@ -258,7 +258,15 @@ class KDATPPlan(TPPlan):
         }
 
 
-TP_PLAN_MAP = {"transformer": TransformerTPPlan, "gla": GLATPPlan, "kda": KDATPPlan}
+TP_PLAN_MAP = {
+    "transformer": TransformerTPPlan,
+    "relu_softpick_1_transformer": TransformerTPPlan,
+    "relu_softpick_2_transformer": TransformerTPPlan,
+    "abs_softmax_1_transformer": TransformerTPPlan,
+    "abs_softmax_2_transformer": TransformerTPPlan,
+    "gla": GLATPPlan,
+    "kda" : KDATPPlan
+}
 
 
 def apply_tp(
