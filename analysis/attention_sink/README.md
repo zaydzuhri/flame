@@ -28,6 +28,19 @@ attention/hidden-state behavior.
 
 - line plots for any recorded metric vs. sequence length
 
+`analysis/attention_sink/build_analysis_table.py` provides:
+
+- LaTeX table generation for sink rate, hidden activation, and sparsity metrics
+- optional ordering via `--model-order` when more than Softmax/Softpick are present
+
+`analysis/attention_sink/scripts/build_table_non_step_10000.sh` provides:
+
+- wrapper for non-step-10000 (vanilla/softpick) table generation
+
+`analysis/attention_sink/scripts/build_table_step_10000.sh` provides:
+
+- wrapper for step-10000 (vanilla/softpick) table generation
+
 `analysis/attention_sink/scripts/download_hf_checkpoint.py` downloads a step
 folder from a Hugging Face repo into a local `checkpoint/` directory. Use
 `--checkpoint-subdir` when the repo stores checkpoints under a subfolder.
@@ -181,3 +194,42 @@ python analysis/attention_sink/plot_length_sweep.py \
   --input-dir analysis/attention_sink/outputs \
   --metric sink_rate.0.2
 ```
+
+Generate the LaTeX analysis table:
+
+```bash
+python analysis/attention_sink/build_analysis_table.py \
+  --input-dir analysis/attention_sink/outputs_real \
+  --sequence-length 4096
+```
+
+Generate the LaTeX analysis table (non step-10000):
+
+```bash
+bash analysis/attention_sink/scripts/build_table_non_step_10000.sh \
+  analysis/attention_sink/outputs_real \
+  4096
+```
+
+Generate the LaTeX analysis table (step-10000):
+
+```bash
+bash analysis/attention_sink/scripts/build_table_step_10000.sh \
+  analysis/attention_sink/outputs_real \
+  4096
+```
+
+To include 1.8B, set both environment variables before running the non step-10000 script:
+
+```bash
+export SOFTMAX_18B_FILE=analysis/attention_sink/outputs_real/<softmax-1.8B-file>.jsonl
+export SOFTPICK_18B_FILE=analysis/attention_sink/outputs_real/<softpick-1.8B-file>.jsonl
+```
+
+The non step-10000 script also auto-detects
+`vanilla-1.8B-4096-truncate_length_sweep.jsonl` and
+`softpick-1.8B-4096-truncate_length_sweep.jsonl` under the output directory.
+
+The step-10000 script auto-detects all
+`*-<size>-*-step-10000-*_length_sweep.jsonl` sweeps under the output directory and
+includes every model prefix it finds.
