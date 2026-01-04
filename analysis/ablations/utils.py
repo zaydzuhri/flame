@@ -11,8 +11,6 @@ import torch
 from datasets import load_dataset
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-import fla  # ensure custom modeling is registered
-
 DTYPE_MAP = {
     "float16": torch.float16,
     "bf16": torch.bfloat16,
@@ -49,6 +47,8 @@ def load_model_and_tokenizer(
     trust_remote_code: bool,
     attn_impl: str | None,
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
+    import fla  # ensure custom modeling is registered
+
     config = AutoConfig.from_pretrained(
         model_name, local_files_only=local_files_only, trust_remote_code=trust_remote_code
     )
