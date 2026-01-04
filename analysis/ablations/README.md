@@ -7,9 +7,10 @@ This folder contains inference-time ablations derived from
 - **Sum-of-Attention**: measure per-head sum of attention weights (no-op signal).
 - **Sink-Logit Variance**: measure variance of attention logits pointing to the sink.
 - **Head Shutdown Dynamics**: measure per-head off-rates across checkpoints and track dead heads.
-- **Head Dormant Analysis**: measure sink-attention focus for softmax checkpoints and track dormant heads.
+- **Head Dormant (Mean Sink)**: measure mean sink attention per head for softmax checkpoints.
 - **Head Shutdown Parser**: summarize head-dead results into readable counts and deltas.
 - **Head Shutdown Plots**: generate ACL-friendly plots from head-dead outputs.
+- **Head Dormant (Guo)**: measure per-token sink dominance rates per head.
 
 ## Scripts
 
@@ -117,9 +118,8 @@ python analysis/ablations/head_dormant_analysis.py \
 
 `analysis/ablations/parse_head_dead_analysis.py`
 
-- Summarizes head-dead or head-dormant JSON output into counts, per-step deltas, and persistent heads.
+- Summarizes head-dead JSON output into counts, per-step deltas, and persistent heads.
 - Use `--show-heads` to list specific head indices.
-- Use `--mode dormant` to force dormant interpretation (auto-detects otherwise).
 
 Example:
 
@@ -131,11 +131,10 @@ python analysis/ablations/parse_head_dead_analysis.py \
 
 `analysis/ablations/plot_head_dead_analysis.py`
 
-- Creates ACL 2-column-ready figures for dead-head or dormant-head trends and heatmaps.
+- Creates ACL 2-column-ready figures for dead-head trends and heatmaps.
 - Uses `edd_utils.register_edd_style()` to match the notebook style.
 - Set `--use-tex` if you want LaTeX text rendering and your environment supports it.
 - Use `--head-bin-size`, `--layer-bin-size`, and `--layer-tick-step` to reduce clutter in the persistent-head map.
-- Use `--mode dormant` to force dormant interpretation (auto-detects otherwise).
 
 Example:
 
@@ -144,6 +143,34 @@ python analysis/ablations/plot_head_dead_analysis.py \
   --input analysis/attention_sink/outputs/softpick-340M-head-dead.json \
   --output-dir analysis/attention_sink/outputs/figures
 ```
+
+`analysis/ablations/head_dormant_analysis_guo.py`
+
+- Implements Guo et al.'s dormant-head idea for softmax models.
+- A head is dormant for a token if sink attention > `--sink-dominance-threshold`
+  (default 0.9) and optional entropy is below `--entropy-threshold`.
+- `dormant_rate[step][layer][head]` is the fraction of tokens that are dormant.
+- Heads are classified using `--dormant-threshold` (default 0.95) and
+  `--mostly-dormant-threshold` (default 0.75).
+- Requires `--attn-impl naive_attn` and `--batch-size 1`.
+
+Example:
+
+```bash
+python analysis/ablations/head_dormant_analysis_guo.py \
+  --model-template analysis/attention_sink/hf_models/softmax-340M-4096-step-{step} \
+  --steps 10000,20000,30000,40000,50000,60000,70000,80000,90000,100000 \
+  --attn-impl naive_attn \
+  --dataset DKYoon/SlimPajama-6B \
+  --split train \
+  --streaming \
+  --batch-size 1 \
+  --padding none \
+  --max-length 4096 \
+  --max-tokens 5000000 \
+  --output analysis/attention_sink/outputs/softmax-340M-head-dormant-guo.json
+```
+
 ## Notes
 
 - Default settings use `--batch-size 1` and `--padding none` to avoid padding
