@@ -11,6 +11,8 @@ This folder contains inference-time ablations derived from
 - **Head Shutdown Parser**: summarize head-dead results into readable counts and deltas.
 - **Head Shutdown Plots**: generate ACL-friendly plots from head-dead outputs.
 - **Head Dormant (Guo)**: measure per-token sink dominance rates per head.
+- **Dormant Threshold Scan**: post-hoc scan of multiple dormant thresholds.
+- **Sink Dominance Sweep**: rerun Guo dormant analysis across sink thresholds.
 
 ## Scripts
 
@@ -116,6 +118,30 @@ python analysis/ablations/head_dormant_analysis.py \
   --output analysis/attention_sink/outputs/softmax-340M-head-dormant.json
 ```
 
+`analysis/ablations/head_dormant_analysis_guo.py`
+
+- Implements Guo et al. style dormancy: per-token sink-dominant attention plus value-state drain.
+- Value-state drain is detected when the sink token value norm is below
+  `--value-drain-threshold * mean(other token norms)`.
+- Requires `--attn-impl naive_attn` and `--batch-size 1` with `--padding none`.
+
+Example:
+
+```bash
+python analysis/ablations/head_dormant_analysis_guo.py \
+  --model-template analysis/attention_sink/hf_models/vanilla-340M-4096-step-{step} \
+  --steps 10000 \
+  --attn-impl naive_attn \
+  --dataset DKYoon/SlimPajama-6B \
+  --split train \
+  --streaming \
+  --batch-size 1 \
+  --padding none \
+  --max-length 2048 \
+  --max-tokens 200000 \
+  --output analysis/attention_sink/outputs/vanilla-340M-head-dormant-guo-step10000.json
+```
+
 `analysis/ablations/parse_head_dead_analysis.py`
 
 - Summarizes head-dead JSON output into counts, per-step deltas, and persistent heads.
@@ -169,6 +195,42 @@ python analysis/ablations/head_dormant_analysis_guo.py \
   --max-length 4096 \
   --max-tokens 5000000 \
   --output analysis/attention_sink/outputs/softmax-340M-head-dormant-guo.json
+```
+
+`analysis/ablations/scan_dormant_thresholds.py`
+
+- Post-hoc scan over multiple dormant thresholds using `dormant_rate`.
+- Avoids re-running attention; works directly on the JSON output.
+
+Example:
+
+```bash
+python analysis/ablations/scan_dormant_thresholds.py \
+  --input analysis/attention_sink/outputs/vanilla-340M-head-dormant-guo-step10000_new.json \
+  --thresholds 0.95,0.9,0.8
+```
+
+`analysis/ablations/scan_sink_dominance_thresholds.py`
+
+- Runs `head_dormant_analysis_guo.py` across sink-dominance thresholds.
+- Defaults to thresholds 0.1..0.9 plus 0.95.
+
+Example:
+
+```bash
+python analysis/ablations/scan_sink_dominance_thresholds.py \
+  --model-template analysis/attention_sink/hf_models/vanilla-340M-4096-step-{step} \
+  --steps 10000,20000,30000,40000,50000,60000,70000,80000,90000,100000 \
+  --attn-impl naive_attn \
+  --dataset DKYoon/SlimPajama-6B \
+  --split train \
+  --streaming \
+  --batch-size 1 \
+  --padding none \
+  --max-length 2048 \
+  --max-tokens 5000000 \
+  --output-prefix vanilla-340M-head-dormant-guo \
+  --output-dir analysis/attention_sink/outputs
 ```
 
 ## Notes

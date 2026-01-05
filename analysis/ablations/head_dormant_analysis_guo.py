@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import torch
+import torch.nn.functional as F
 from datasets import load_dataset
 from tqdm import tqdm
 
@@ -123,12 +124,15 @@ def _sink_index(sink_index: int, k_len: int) -> int:
 
 def compute_sink_stats(
     attentions: torch.Tensor,
+    value_norms: torch.Tensor,
     attention_mask: torch.Tensor | None,
     sink_index: int,
     entropy_eps: float,
     sink_dominance_threshold: float,
     entropy_threshold: float | None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    value_drain_threshold: float,
+    value_drain_eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     k_len = attentions.shape[-1]
     sink_idx = _sink_index(sink_index, k_len)
     sink_attention = attentions[..., sink_idx]  # [B, H, T]
@@ -136,21 +140,67 @@ def compute_sink_stats(
     entropy = -(attn_safe * attn_safe.log()).sum(dim=-1)
     if k_len > 1:
         entropy = entropy / math.log(k_len)
+    mask = None
+    if attention_mask is not None:
+        mask = attention_mask.to(dtype=torch.bool)
+        value_norms = value_norms * mask[:, None, :]
+        token_counts = mask.sum(dim=-1).clamp_min(1).to(value_norms.dtype)
+    else:
+        token_counts = torch.full(
+            (value_norms.shape[0],),
+            float(k_len),
+            device=value_norms.device,
+            dtype=value_norms.dtype,
+        )
+    sink_norm = value_norms[..., sink_idx]  # [B, H]
+    if k_len > 1:
+        denom = (token_counts - 1).clamp_min(1)
+        mean_other = (value_norms.sum(dim=-1) - sink_norm) / denom[:, None]
+    else:
+        mean_other = torch.zeros_like(sink_norm)
+    mean_other = mean_other.clamp_min(value_drain_eps)
+    value_drain_mask = sink_norm <= value_drain_threshold * mean_other
+    value_drain_mask = value_drain_mask[:, :, None].expand_as(sink_attention)
+
     dormant_mask = sink_attention > sink_dominance_threshold
     if entropy_threshold is not None:
         dormant_mask = dormant_mask & (entropy < entropy_threshold)
-    if attention_mask is not None:
-        mask = attention_mask.to(dtype=torch.bool)
+    dormant_mask = dormant_mask & value_drain_mask
+    if mask is not None:
         sink_attention = sink_attention * mask[:, None, :]
         entropy = entropy * mask[:, None, :]
         dormant_mask = dormant_mask & mask[:, None, :]
+        value_drain_mask = value_drain_mask & mask[:, None, :]
         valid_tokens = int(mask.sum().item())
     else:
         valid_tokens = sink_attention.shape[0] * sink_attention.shape[2]
     sink_sum = sink_attention.sum(dim=(0, 2)).to(dtype=torch.float64)
     entropy_sum = entropy.sum(dim=(0, 2)).to(dtype=torch.float64)
     dormant_count = dormant_mask.sum(dim=(0, 2)).to(dtype=torch.float64)
-    return sink_sum, entropy_sum, dormant_count, valid_tokens
+    value_drain_count = value_drain_mask.sum(dim=(0, 2)).to(dtype=torch.float64)
+    return sink_sum, entropy_sum, dormant_count, value_drain_count, valid_tokens
+
+
+def compute_value_state_norms(attn_module: torch.nn.Module, hidden_states: torch.Tensor) -> torch.Tensor:
+    v = attn_module.v_proj(hidden_states)
+    head_dim = attn_module.head_dim
+    num_heads = attn_module.num_heads
+    num_kv_heads = getattr(attn_module, "num_kv_heads", num_heads)
+    if v.shape[-1] % head_dim != 0:
+        raise ValueError(
+            f"Value projection dim {v.shape[-1]} not divisible by head_dim {head_dim}."
+        )
+    v = v.view(v.shape[0], v.shape[1], num_kv_heads, head_dim)
+    if num_kv_heads != num_heads:
+        repeat_factor = num_heads // num_kv_heads
+        v = v.repeat_interleave(repeat_factor, dim=2)
+    v = v.permute(0, 2, 1, 3)  # [B, H, T, D]
+    o_split = attn_module.o_proj.weight.split(head_dim, dim=1)
+    norms = []
+    for head_idx, weight in enumerate(o_split[:num_heads]):
+        vo = F.linear(v[:, head_idx, :, :], weight)
+        norms.append(torch.linalg.norm(vo, dim=-1))
+    return torch.stack(norms, dim=1)
 
 
 class SinkAttentionAccumulator:
@@ -160,12 +210,16 @@ class SinkAttentionAccumulator:
         entropy_eps: float,
         sink_dominance_threshold: float,
         entropy_threshold: float | None,
+        value_drain_threshold: float,
+        value_drain_eps: float,
         num_heads_by_layer: Sequence[int],
     ) -> None:
         self.sink_index = int(sink_index)
         self.entropy_eps = float(entropy_eps)
         self.sink_dominance_threshold = float(sink_dominance_threshold)
         self.entropy_threshold = entropy_threshold
+        self.value_drain_threshold = float(value_drain_threshold)
+        self.value_drain_eps = float(value_drain_eps)
         self.sink_sums = [
             torch.zeros(num_heads, dtype=torch.float64) for num_heads in num_heads_by_layer
         ]
@@ -175,31 +229,47 @@ class SinkAttentionAccumulator:
         self.dormant_counts = [
             torch.zeros(num_heads, dtype=torch.float64) for num_heads in num_heads_by_layer
         ]
+        self.value_drain_counts = [
+            torch.zeros(num_heads, dtype=torch.float64) for num_heads in num_heads_by_layer
+        ]
         self.total_counts = [0.0 for _ in num_heads_by_layer]
         self.attention_mask: torch.Tensor | None = None
+        self._hidden_states: list[torch.Tensor | None] = [None for _ in num_heads_by_layer]
 
     def set_attention_mask(self, attention_mask: torch.Tensor | None) -> None:
         self.attention_mask = attention_mask
 
-    def update(self, attentions: Sequence[torch.Tensor]) -> None:
-        if len(attentions) != len(self.sink_sums):
-            raise ValueError(
-                f"Expected {len(self.sink_sums)} attention layers, got {len(attentions)}."
-            )
-        for idx, attn in enumerate(attentions):
-            sink_sum, entropy_sum, dormant_count, valid_tokens = compute_sink_stats(
-                attn,
-                self.attention_mask,
-                self.sink_index,
-                self.entropy_eps,
-                self.sink_dominance_threshold,
-                self.entropy_threshold,
-            )
-            self.sink_sums[idx] += sink_sum.cpu()
-            self.entropy_sums[idx] += entropy_sum.cpu()
-            self.dormant_counts[idx] += dormant_count.cpu()
-            if valid_tokens > 0:
-                self.total_counts[idx] += float(valid_tokens)
+    def set_hidden_states(self, layer_idx: int, hidden_states: torch.Tensor) -> None:
+        self._hidden_states[layer_idx] = hidden_states
+
+    def pop_hidden_states(self, layer_idx: int) -> torch.Tensor | None:
+        hidden_states = self._hidden_states[layer_idx]
+        self._hidden_states[layer_idx] = None
+        return hidden_states
+
+    def update_layer(
+        self,
+        layer_idx: int,
+        attentions: torch.Tensor,
+        value_norms: torch.Tensor,
+    ) -> None:
+        sink_sum, entropy_sum, dormant_count, value_drain_count, valid_tokens = compute_sink_stats(
+            attentions,
+            value_norms,
+            self.attention_mask,
+            self.sink_index,
+            self.entropy_eps,
+            self.sink_dominance_threshold,
+            self.entropy_threshold,
+            self.value_drain_threshold,
+            self.value_drain_eps,
+        )
+        self.sink_sums[layer_idx] += sink_sum.cpu()
+        self.entropy_sums[layer_idx] += entropy_sum.cpu()
+        self.dormant_counts[layer_idx] += dormant_count.cpu()
+        self.value_drain_counts[layer_idx] += value_drain_count.cpu()
+        if valid_tokens > 0:
+            self.total_counts[layer_idx] += float(valid_tokens)
 
     def sink_attention_rates(self) -> list[list[float]]:
         rates: list[list[float]] = []
@@ -227,6 +297,46 @@ class SinkAttentionAccumulator:
                 continue
             rates.append((counts / total).tolist())
         return rates
+
+    def value_drain_rates(self) -> list[list[float]]:
+        rates: list[list[float]] = []
+        for counts, total in zip(self.value_drain_counts, self.total_counts):
+            if total <= 0:
+                rates.append([float("nan") for _ in range(counts.numel())])
+                continue
+            rates.append((counts / total).tolist())
+        return rates
+
+
+def register_attention_hooks(
+    layers: list[LayerSpec],
+    accumulator: SinkAttentionAccumulator,
+) -> list[torch.utils.hooks.RemovableHandle]:
+    handles: list[torch.utils.hooks.RemovableHandle] = []
+    for idx, layer in enumerate(layers):
+        def pre_hook(module, inputs, kwargs, layer_idx=idx):
+            hidden_states = kwargs.get("hidden_states")
+            if hidden_states is None and inputs:
+                hidden_states = inputs[0]
+            if hidden_states is not None:
+                accumulator.set_hidden_states(layer_idx, hidden_states)
+
+        def hook(module, inputs, kwargs, output, layer_idx=idx):
+            if output is None or len(output) < 2:
+                return
+            attentions = output[1]
+            if attentions is None:
+                return
+            hidden_states = accumulator.pop_hidden_states(layer_idx)
+            if hidden_states is None:
+                return
+            value_norms = compute_value_state_norms(module, hidden_states)
+            accumulator.update_layer(layer_idx, attentions, value_norms)
+
+        pre_handle = layer.module.register_forward_pre_hook(pre_hook, with_kwargs=True)
+        handle = layer.module.register_forward_hook(hook, with_kwargs=True)
+        handles.extend([pre_handle, handle])
+    return handles
 
 
 def collect_attention_modules(model: torch.nn.Module) -> list[LayerSpec]:
@@ -419,6 +529,18 @@ def parse_args() -> argparse.Namespace:
         help="Per-token sink attention threshold for dormancy checks.",
     )
     parser.add_argument(
+        "--value-drain-threshold",
+        type=float,
+        default=0.1,
+        help="Sink value-state norm ratio threshold for value-state drains.",
+    )
+    parser.add_argument(
+        "--value-drain-eps",
+        type=float,
+        default=1e-12,
+        help="Epsilon for value-state drain ratio computation.",
+    )
+    parser.add_argument(
         "--dormant-threshold",
         type=float,
         default=0.95,
@@ -463,6 +585,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-tokens must be non-zero or -1 for all tokens.")
     if args.sink_dominance_threshold <= 0 or args.sink_dominance_threshold > 1:
         raise ValueError("--sink-dominance-threshold must be in (0, 1].")
+    if args.value_drain_threshold <= 0 or args.value_drain_threshold > 1:
+        raise ValueError("--value-drain-threshold must be in (0, 1].")
     if args.dormant_threshold <= 0 or args.dormant_threshold > 1:
         raise ValueError("--dormant-threshold must be in (0, 1].")
     if args.mostly_dormant_threshold <= 0 or args.mostly_dormant_threshold > 1:
@@ -484,15 +608,18 @@ def run_checkpoint(
     dataset_iterable: Iterable[dict],
     device: torch.device,
     args: argparse.Namespace,
-) -> tuple[list[list[float]], list[list[float]], list[list[float]], dict]:
+) -> tuple[list[list[float]], list[list[float]], list[list[float]], list[list[float]], dict]:
     num_heads_by_layer = [layer.num_heads for layer in layers]
     accumulator = SinkAttentionAccumulator(
         sink_index=args.sink_index,
         entropy_eps=args.entropy_eps,
         sink_dominance_threshold=args.sink_dominance_threshold,
         entropy_threshold=args.entropy_threshold,
+        value_drain_threshold=args.value_drain_threshold,
+        value_drain_eps=args.value_drain_eps,
         num_heads_by_layer=num_heads_by_layer,
     )
+    hooks = register_attention_hooks(layers, accumulator)
 
     tokens_processed = 0
     samples_processed = 0
@@ -522,11 +649,10 @@ def run_checkpoint(
                 use_cache=False,
                 return_dict=True,
             )
-        if outputs.attentions is None or any(attn is None for attn in outputs.attentions):
+        if outputs.attentions is None:
             raise RuntimeError(
                 "Model returned no attentions. Use --attn-impl naive_attn to enable attention outputs."
             )
-        accumulator.update(tuple(attn for attn in outputs.attentions if attn is not None))
         accumulator.set_attention_mask(None)
         tokens_processed += batch_tokens
         samples_processed += input_ids.shape[0]
@@ -537,10 +663,14 @@ def run_checkpoint(
         "samples_processed": samples_processed,
         "tokens_processed": tokens_processed,
     }
+    for handle in hooks:
+        handle.remove()
+
     return (
         accumulator.sink_attention_rates(),
         accumulator.entropy_rates(),
         accumulator.dormant_rates(),
+        accumulator.value_drain_rates(),
         metadata,
     )
 
@@ -556,6 +686,7 @@ def main() -> None:
     sink_rates_by_step: list[list[list[float]]] = []
     entropy_rates_by_step: list[list[list[float]]] = []
     dormant_rates_by_step: list[list[list[float]]] = []
+    value_drain_rates_by_step: list[list[list[float]]] = []
     step_metadata: dict[str, dict] = {}
     layer_ids: list[int] | None = None
     layer_names: list[str] | None = None
@@ -585,7 +716,7 @@ def main() -> None:
             args.shuffle_buffer,
         )
 
-        sink_rates, entropy_rates, dormant_rates, metadata = run_checkpoint(
+        sink_rates, entropy_rates, dormant_rates, value_drain_rates, metadata = run_checkpoint(
             model_path=model_path,
             model=model,
             layers=layers,
@@ -597,6 +728,7 @@ def main() -> None:
         sink_rates_by_step.append(sink_rates)
         entropy_rates_by_step.append(entropy_rates)
         dormant_rates_by_step.append(dormant_rates)
+        value_drain_rates_by_step.append(value_drain_rates)
         step_metadata[str(step)] = metadata
 
     summary = compute_dormant_summary(
@@ -627,6 +759,8 @@ def main() -> None:
         "entropy_eps": args.entropy_eps,
         "entropy_normalized": True,
         "sink_dominance_threshold": args.sink_dominance_threshold,
+        "value_drain_threshold": args.value_drain_threshold,
+        "value_drain_eps": args.value_drain_eps,
         "dormant_threshold": args.dormant_threshold,
         "mostly_dormant_threshold": args.mostly_dormant_threshold,
         "entropy_threshold": args.entropy_threshold,
@@ -637,6 +771,9 @@ def main() -> None:
         "sink_attention": {str(step): rates for step, rates in zip(steps, sink_rates_by_step)},
         "entropy": {str(step): rates for step, rates in zip(steps, entropy_rates_by_step)},
         "dormant_rate": {str(step): rates for step, rates in zip(steps, dormant_rates_by_step)},
+        "value_drain_rate": {
+            str(step): rates for step, rates in zip(steps, value_drain_rates_by_step)
+        },
         **summary,
     }
 

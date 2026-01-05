@@ -28,6 +28,11 @@ attention/hidden-state behavior.
 
 - line plots for any recorded metric vs. sequence length
 
+`analysis/attention_sink/parse_length_sweep_series.py` provides:
+
+- summary table across checkpoint JSONL outputs for a fixed sequence length
+- optional CSV/JSON output for downstream plotting
+
 `analysis/attention_sink/build_analysis_table.py` provides:
 
 - LaTeX table generation for sink rate, hidden activation, and sparsity metrics
