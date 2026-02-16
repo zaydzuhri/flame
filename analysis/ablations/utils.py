@@ -62,7 +62,6 @@ def load_model_and_tokenizer(
                 "compatible model config."
             )
         config.attn_impl = attn_impl
-
     tokenizer = AutoTokenizer.from_pretrained(
         model_name, local_files_only=local_files_only, trust_remote_code=trust_remote_code
     )

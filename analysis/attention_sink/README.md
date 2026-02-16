@@ -53,6 +53,15 @@ folder from a Hugging Face repo into a local `checkpoint/` directory. Use
 `analysis/attention_sink/scripts/convert_dcp_to_hf.py` converts a DCP
 `checkpoint/step-<n>` folder into Hugging Face `save_pretrained` format.
 
+`analysis/attention_sink/scripts/run_head_dead_pipeline.py` runs the full
+head-dead workflow in one command:
+
+- download each requested DCP step from Hugging Face
+- convert each `checkpoint/step-<n>` to HF format under `hf_models/`
+- run `analysis/ablations/head_dead_analysis.py` across all converted steps
+- automatically skip conversion for steps whose HF output directory already has
+  config/tokenizer metadata and model weights (use `--force-convert` to override)
+
 Legacy scripts (kept for reference only) live in `analysis/attention_sink/legacy/`.
 
 ## Usage
@@ -77,7 +86,7 @@ If the repo nests the checkpoint under a subfolder, provide the subdirectory
 python analysis/attention_sink/scripts/download_hf_checkpoint.py \
   --repo-id zaydzuhri/softpick-340M-4096-batch16-steps100000 \
   --checkpoint-subdir checkpoint \
-  --step 1 \
+  --step 10000 \
   --allow-pattern config.json \
   --allow-pattern tokenizer.json \
   --allow-pattern tokenizer_config.json \
@@ -89,11 +98,35 @@ Convert the DCP checkpoint to Hugging Face format:
 
 ```bash
 python analysis/attention_sink/scripts/convert_dcp_to_hf.py \
-  --checkpoint-root analysis/attention_sink/runs/vanilla-340M-4096 \
+  --checkpoint-root analysis/attention_sink/runs/softpick-340M-4096 \
   --step 10000 \
-  --base-model zaydzuhri/vanilla-340M-4096-model \
+  --config configs/softpick_transformer_340M.json \
+  --tokenizer zaydzuhri/vanilla-1.8B-4096-model \
   --no-local-files-only \
-  --output-dir analysis/attention_sink/hf_models/vanilla-340M-4096-step-10000
+  --output-dir analysis/attention_sink/hf_models/softpick-340M-4096-step-10000
+```
+
+Run the full Softpick head-dead pipeline (download + convert + analyze):
+
+```bash
+python analysis/attention_sink/scripts/run_head_dead_pipeline.py \
+  --repo-id zaydzuhri/softpick-340M-4096-batch16-steps100000 \
+  --checkpoint-subdir checkpoint \
+  --steps 10000,20000,30000,40000,50000,60000,70000,80000,90000,100000 \
+  --run-root analysis/attention_sink/runs/softpick-340M-4096 \
+  --hf-model-template analysis/attention_sink/hf_models/softpick-340M-4096-step-{step} \
+  --config configs/softpick_transformer_340M.json \
+  --tokenizer zaydzuhri/vanilla-1.8B-4096-model \
+  --no-convert-local-files-only \
+  --no-analysis-local-files-only \
+  --dataset DKYoon/SlimPajama-6B \
+  --split train \
+  --streaming \
+  --batch-size 2 \
+  --max-length 4096 \
+  --max-tokens 5000000 \
+  --eps 1e-2 \
+  --analysis-output analysis/attention_sink/outputs/softpick-340M-head-dead.json
 ```
 
 Generate text:
