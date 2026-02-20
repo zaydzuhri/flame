@@ -6,6 +6,7 @@
 
 import json
 import os
+import importlib
 import time
 from datetime import timedelta
 
@@ -36,7 +37,7 @@ from datetime import datetime
 import custom_models
 from flame.components.checkpoint import TrainState
 from flame.config_manager import JobConfig
-from flame.data import build_dataloader, build_dataset
+from flame.data import build_dataloader as flame_build_dataloader
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_nparams_and_flops
@@ -55,17 +56,26 @@ register_train_spec(
         pipelining_fn=pipeline_fla,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
-        build_dataloader_fn=build_dataloader,
+        build_dataloader_fn=flame_build_dataloader,
         build_tokenizer_fn=build_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
     )
 )
 
 
+def resolve_data_backend(data_backend: str):
+    module_name = "flame.data" if data_backend == "flame" else "tasklets.data"
+    data_module = importlib.import_module(module_name)
+    return data_module.build_dataset, data_module.build_dataloader
+
+
 # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
 @record
 def main(job_config: JobConfig):
     logger.info(f"Starting job: {job_config.job.description}")
+    data_backend = job_config.training.data_backend
+    build_dataset_fn, build_dataloader_fn = resolve_data_backend(data_backend)
+    logger.info(f"Using data backend: {data_backend} ({build_dataset_fn.__module__})")
 
     if job_config.experimental.custom_model_path:
         utils.import_module_from_path(job_config.experimental.custom_model_path)
@@ -169,7 +179,7 @@ def main(job_config: JobConfig):
         if job_config.training.dataset_name is not None
         else ""
     )
-    dataset = build_dataset(
+    dataset = build_dataset_fn(
         dataset=job_config.training.dataset,
         dataset_name=job_config.training.dataset_name,
         dataset_split=job_config.training.dataset_split,
@@ -183,7 +193,7 @@ def main(job_config: JobConfig):
     )
 
     logger.info("Building dataloader...")
-    dataloader = build_dataloader(
+    dataloader = build_dataloader_fn(
         dataset=dataset,
         tokenizer=tokenizer,
         rank=dp_rank,

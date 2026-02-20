@@ -309,6 +309,13 @@ class JobConfig:
             help="Dataset to use, with comma separated values",
         )
         self.parser.add_argument(
+            "--training.data_backend",
+            type=str,
+            default="flame",
+            choices=["flame", "tasklets"],
+            help="Data backend to use for dataset/dataloader construction.",
+        )
+        self.parser.add_argument(
             "--training.dataset_name",
             default=None,
             help="The name of the dataset config, with comma separated values if provided",
