@@ -2,7 +2,8 @@ import os
 import csv
 import argparse
 import random
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Callable
+from tqdm import tqdm
 
 Token = str
 
@@ -29,60 +30,74 @@ def to_str(tokens) -> List[str]:
     return [str(t) for t in tokens]
 
 
-def write_dataset(train_samples, test_samples, output_dir: str):
-    os.makedirs(output_dir, exist_ok=True)
-    train_path = f"{output_dir}/train.csv"
-    test_path  = f"{output_dir}/test.csv"
-
-    def write(path, samples):
-        with open(path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["x", "y"])
-            writer.writeheader()
-            for s in samples:
-                writer.writerow({
-                    "x": " ".join(s["x"]),
-                    "y": " ".join(s["y"])
-                })
-
-    write(train_path, train_samples)
-    write(test_path, test_samples)
-
-
-def samples_to_columnar(samples: List[Dict]) -> Dict:
-    if not samples:
-        return {}
-    serialized_samples = []
-    for sample in samples:
-        serialized_sample = {}
-        for key, value in sample.items():
-            if isinstance(value, list):
-                serialized_sample[key] = " ".join(str(v) for v in value)
-            else:
-                serialized_sample[key] = str(value)
-        serialized_samples.append(serialized_sample)
-
-    expected_keys = set(serialized_samples[0].keys())
-    for i, sample in enumerate(serialized_samples[1:], start=1):
-        sample_keys = set(sample.keys())
-        if sample_keys != expected_keys:
-            raise ValueError(
-                f"Inconsistent sample columns at index {i}: {sorted(sample_keys)} != {sorted(expected_keys)}"
-            )
-    return {k: [sample[k] for sample in serialized_samples] for k in sorted(expected_keys)}
-
-
 def upload_dataset_to_hf(
-    train_samples: List[Dict],
-    test_samples: List[Dict],
+    train_path: str,
+    test_path: str,
     repo_id: str,
     private: bool,
 ) -> None:
-    from datasets import Dataset, DatasetDict
+    from datasets import load_dataset
 
-    train_dataset = Dataset.from_dict(samples_to_columnar(train_samples))
-    test_dataset = Dataset.from_dict(samples_to_columnar(test_samples))
-    dataset_dict = DatasetDict({"train": train_dataset, "test": test_dataset})
+    dataset_dict = load_dataset(
+        "csv",
+        data_files={"train": train_path, "test": test_path},
+    )
     dataset_dict.push_to_hub(repo_id, private=private)
+
+
+def serialize_sample(sample: Dict) -> Dict[str, str]:
+    serialized_sample = {}
+    for key, value in sample.items():
+        if isinstance(value, list):
+            serialized_sample[key] = " ".join(str(v) for v in value)
+        else:
+            serialized_sample[key] = str(value)
+    return serialized_sample
+
+
+def write_split(
+    path: str,
+    num_samples: int,
+    sample_fn: Callable[[], Dict],
+    desc: str,
+) -> None:
+    with open(path, "w", newline="") as f:
+        writer = None
+        expected_keys = None
+        for idx in tqdm(range(num_samples), desc=desc, unit="sample"):
+            sample = sample_fn()
+            serialized_sample = serialize_sample(sample)
+            sample_keys = list(serialized_sample.keys())
+
+            if writer is None:
+                expected_keys = sample_keys
+                writer = csv.DictWriter(f, fieldnames=expected_keys)
+                writer.writeheader()
+            elif sample_keys != expected_keys:
+                raise ValueError(
+                    f"Inconsistent sample columns at index {idx}: {sample_keys} != {expected_keys}"
+                )
+
+            writer.writerow(serialized_sample)
+
+        if writer is None:
+            writer = csv.DictWriter(f, fieldnames=["x", "y"])
+            writer.writeheader()
+
+
+def write_dataset_streaming(
+    output_dir: str,
+    num_train: int,
+    train_sample_fn: Callable[[], Dict],
+    num_test: int,
+    test_sample_fn: Callable[[], Dict],
+) -> Tuple[str, str]:
+    os.makedirs(output_dir, exist_ok=True)
+    train_path = f"{output_dir}/train.csv"
+    test_path = f"{output_dir}/test.csv"
+    write_split(train_path, num_train, train_sample_fn, desc="Generating train")
+    write_split(test_path, num_test, test_sample_fn, desc="Generating test")
+    return train_path, test_path
 
 # === Recall tasks ===
 
@@ -266,6 +281,52 @@ def gen_memorization_dataset(vocab_size: int, num_pairs: int, num_test: int) -> 
         test_samples.append({"x": x, "y": y, "m": m_y})
     return train_samples, test_samples
 
+
+def make_memorization_sample_fns(
+    vocab_size: int,
+    num_pairs: int,
+) -> Tuple[Callable[[], Dict], Callable[[], Dict]]:
+    # create a permutation-based mapping once, then sample queries from it repeatedly
+    keys = random.sample(range(1, vocab_size + 1), num_pairs)
+    remaining = [v for v in range(1, vocab_size + 1) if v not in keys]
+    if len(remaining) < num_pairs:
+        values = [(k % vocab_size) + 1 for k in keys]
+    else:
+        values = random.sample(remaining, num_pairs)
+    mapping = dict(zip(keys, values))
+
+    train_x: List[str] = []
+    for i, (k, v) in enumerate(mapping.items()):
+        train_x.extend([str(k), str(v)])
+        if i != len(mapping) - 1:
+            train_x.append("|")
+    train_y: List[str] = [str(mapping[keys[0]]), "|"]
+    for i in range(1, len(keys)):
+        k = keys[i]
+        v = mapping[k]
+        train_y.extend([str(k), str(v), "|"])
+    train_m = [0 if t == "|" else 1 for t in train_y]
+    fixed_train_sample = {"x": train_x, "y": train_y, "m": train_m}
+
+    def train_sample_fn() -> Dict:
+        return fixed_train_sample
+
+    def test_sample_fn() -> Dict:
+        q_keys = random.sample(keys, min(4, len(keys)))
+        x: List[str] = []
+        for i, k in enumerate(q_keys):
+            x.append(str(k))
+            x.append("m")
+            if i != len(q_keys) - 1:
+                x.append("|")
+        y: List[str] = []
+        for k in q_keys:
+            y.extend([str(mapping[k]), "_", "_"])
+        m_y = [1 if t not in ["|", "_"] else 0 for t in y]
+        return {"x": x, "y": y, "m": m_y}
+
+    return train_sample_fn, test_sample_fn
+
 # === Reversal (predecessor lookup) ===
 
 def gen_reversal_sample(seq_len: int, vocab_size: int) -> Dict:
@@ -382,83 +443,65 @@ def main():
     parser = build_arg_parser()
     args = parser.parse_args()
     random.seed(args.seed)
-
-    train_samples: List[Dict] = []
-    test_samples: List[Dict] = []
+    train_sample_fn: Callable[[], Dict]
+    test_sample_fn: Callable[[], Dict]
 
     if args.task == "single_recall":
-        train_samples = [gen_single_query_recall_sample(args.seq_len, args.vocab_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_single_query_recall_sample(args.seq_len, args.vocab_size)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_single_query_recall_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_single_query_recall_sample(args.seq_len, args.vocab_size)
     elif args.task == "multi_recall":
-        train_samples = [gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
+        test_sample_fn = lambda: gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
     elif args.task == "fuzzy_recall":
-        train_samples = [gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
+        test_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
     elif args.task == "noisy_recall":
-        train_samples = [gen_noisy_recall_sample(args.seq_len, args.vocab_size,
-                                                 args.num_queries, args.noise_prob)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_noisy_recall_sample(args.seq_len, args.vocab_size,
-                                                args.num_queries, args.noise_prob)
-                        for _ in range(args.num_test)]
-    elif args.task == "full_copy":
-        train_samples = [gen_full_copy_sample(args.seq_len, args.vocab_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_full_copy_test_sample(args.seq_len, args.vocab_size)
-                        for _ in range(args.num_test)]
-    elif args.task == "reverse_copy":
-        train_samples = [gen_reverse_copy_sample(args.seq_len, args.vocab_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_reverse_copy_test_sample(args.seq_len, args.vocab_size)
-                        for _ in range(args.num_test)]
-    elif args.task == "selective_copy":
-        train_samples = [gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
-                        for _ in range(args.num_test)]
-    elif args.task == "memorization":
-        train_samples, test_samples = gen_memorization_dataset(
-            vocab_size=args.vocab_size,
-            num_pairs=args.num_pairs,
-            num_test=args.num_test,
+        train_sample_fn = lambda: gen_noisy_recall_sample(
+            args.seq_len, args.vocab_size, args.num_queries, args.noise_prob
         )
-        # if user asked for more than 1 train sample, just duplicate
-        if args.num_train > 1:
-            train_samples = train_samples * args.num_train
+        test_sample_fn = lambda: gen_noisy_recall_sample(
+            args.seq_len, args.vocab_size, args.num_queries, args.noise_prob
+        )
+    elif args.task == "full_copy":
+        train_sample_fn = lambda: gen_full_copy_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_full_copy_test_sample(args.seq_len, args.vocab_size)
+    elif args.task == "reverse_copy":
+        train_sample_fn = lambda: gen_reverse_copy_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_reverse_copy_test_sample(args.seq_len, args.vocab_size)
+    elif args.task == "selective_copy":
+        train_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
+        test_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
+    elif args.task == "memorization":
+        train_sample_fn, test_sample_fn = make_memorization_sample_fns(
+            vocab_size=args.vocab_size, num_pairs=args.num_pairs
+        )
     elif args.task == "reversal":
-        train_samples = [gen_reversal_sample(args.seq_len, args.vocab_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_reversal_test_sample(args.seq_len, args.vocab_size)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_reversal_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_reversal_test_sample(args.seq_len, args.vocab_size)
     elif args.task == "sorting":
-        train_samples = [gen_sorting_sample(args.num_pairs)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_sorting_sample(args.num_pairs)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
+        test_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
     elif args.task == "counting":
-        train_samples = [gen_counting_sample(args.seq_len, args.vocab_size)
-                         for _ in range(args.num_train)]
-        test_samples = [gen_counting_test_sample(args.seq_len, args.vocab_size)
-                        for _ in range(args.num_test)]
+        train_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_counting_test_sample(args.seq_len, args.vocab_size)
     else:
         raise ValueError(f"Unknown task {args.task}")
 
     output_dir = args.output_dir if args.output_dir else f"./data/{args.task}"
-    write_dataset(train_samples, test_samples, output_dir)
+    train_path, test_path = write_dataset_streaming(
+        output_dir=output_dir,
+        num_train=args.num_train,
+        train_sample_fn=train_sample_fn,
+        num_test=args.num_test,
+        test_sample_fn=test_sample_fn,
+    )
 
     if args.upload_to_hf:
         if not args.hf_repo_id:
             parser.error("--hf-repo-id is required when --upload-to-hf is set.")
         upload_dataset_to_hf(
-            train_samples=train_samples,
-            test_samples=test_samples,
+            train_path=train_path,
+            test_path=test_path,
             repo_id=args.hf_repo_id,
             private=args.hf_private,
         )

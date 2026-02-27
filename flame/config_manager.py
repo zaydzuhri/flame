@@ -326,6 +326,54 @@ class JobConfig:
             help="Dataset split to use, with comma separated values if provided",
         )
         self.parser.add_argument(
+            "--training.validation_interval",
+            type=int,
+            default=0,
+            help="Run validation every N training steps. Set to 0 to disable validation.",
+        )
+        self.parser.add_argument(
+            "--training.validation_steps",
+            type=int,
+            default=10,
+            help="Number of validation batches to evaluate per validation run.",
+        )
+        self.parser.add_argument(
+            "--training.validation_dataset",
+            default=None,
+            help="Optional validation dataset override. Defaults to --training.dataset when unset.",
+        )
+        self.parser.add_argument(
+            "--training.validation_dataset_name",
+            default=None,
+            help="Optional validation dataset_name override. Defaults to --training.dataset_name when unset.",
+        )
+        self.parser.add_argument(
+            "--training.validation_dataset_split",
+            default="validation",
+            help="Validation dataset split to use.",
+        )
+        self.parser.add_argument(
+            "--training.validation_data_dir",
+            default=None,
+            help="Optional validation data_dir override. Defaults to --training.data_dir when unset.",
+        )
+        self.parser.add_argument(
+            "--training.validation_data_files",
+            default=None,
+            help="Optional validation data_files override. Defaults to --training.data_files when unset.",
+        )
+        self.parser.add_argument(
+            "--training.validation_data_probs",
+            default=None,
+            help="Optional validation data_probs override. Defaults to --training.data_probs when unset.",
+        )
+        self.parser.add_argument(
+            "--training.validation_batch_size",
+            type=int,
+            default=None,
+            help="Optional per-device validation batch size. Defaults to --training.batch_size when unset.",
+        )
+        self.parser.add_argument(
             "--training.data_dir",
             default=None,
             help="Data dirs to use, with comma separated values if provided",
@@ -959,6 +1007,16 @@ class JobConfig:
         # TODO: Add more mandatory validations
         assert self.model.config
         assert self.model.tokenizer_path
+        assert self.training.validation_interval >= 0, (
+            "--training.validation_interval must be >= 0"
+        )
+        assert self.training.validation_steps >= 0, (
+            "--training.validation_steps must be >= 0"
+        )
+        if self.training.validation_batch_size is not None:
+            assert self.training.validation_batch_size > 0, (
+                "--training.validation_batch_size must be > 0 when set"
+            )
 
     def _get_string_list_argument_names(self) -> list[str]:
         """Get the parser argument names of type `string_list`."""

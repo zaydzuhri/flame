@@ -207,6 +207,67 @@ def main(job_config: JobConfig):
         persistent_workers=job_config.training.persistent_workers,
         snapshot_every_n_steps=job_config.checkpoint.interval,
     )
+    validation_dataloader = None
+    validation_data_iterator = None
+    validation_enabled = (
+        job_config.training.validation_interval > 0
+        and job_config.training.validation_steps > 0
+    )
+    if validation_enabled:
+        validation_dataset = build_dataset_fn(
+            dataset=(
+                job_config.training.validation_dataset
+                or job_config.training.dataset
+            ),
+            dataset_name=(
+                job_config.training.validation_dataset_name
+                if job_config.training.validation_dataset_name is not None
+                else job_config.training.dataset_name
+            ),
+            dataset_split=job_config.training.validation_dataset_split,
+            data_dir=(
+                job_config.training.validation_data_dir
+                if job_config.training.validation_data_dir is not None
+                else job_config.training.data_dir
+            ),
+            data_files=(
+                job_config.training.validation_data_files
+                if job_config.training.validation_data_files is not None
+                else job_config.training.data_files
+            ),
+            data_probs=(
+                job_config.training.validation_data_probs
+                if job_config.training.validation_data_probs is not None
+                else job_config.training.data_probs
+            ),
+            streaming=job_config.training.streaming,
+            dp_degree=dp_degree,
+            num_workers=job_config.training.num_workers,
+            seed=job_config.training.seed,
+        )
+        validation_dataloader = build_dataloader_fn(
+            dataset=validation_dataset,
+            tokenizer=tokenizer,
+            rank=dp_rank,
+            world_size=dp_degree,
+            batch_size=(
+                job_config.training.validation_batch_size
+                or job_config.training.batch_size
+            ),
+            seq_len=job_config.training.seq_len,
+            context_len=job_config.training.context_len,
+            varlen=job_config.training.varlen,
+            num_workers=job_config.training.num_workers,
+            pin_memory=job_config.training.pin_memory,
+            persistent_workers=job_config.training.persistent_workers,
+            snapshot_every_n_steps=None,
+        )
+        validation_data_iterator = iter(validation_dataloader)
+        logger.info(
+            f"Validation enabled: interval={job_config.training.validation_interval}, "
+            f"steps={job_config.training.validation_steps}, "
+            f"split={job_config.training.validation_dataset_split}"
+        )
 
     logger.info(f"Loading model config from {job_config.model.config}")
     model_config = AutoConfig.from_pretrained(job_config.model.config)
@@ -383,6 +444,50 @@ def main(job_config: JobConfig):
         device_type,
     )
 
+    def _prepare_batch_inputs(batch):
+        input_ids = batch["input_ids"].to(device_type)
+        labels = batch["labels"].to(device_type)
+        cu_seqlens = (
+            batch["cu_seqlens"].to(device_type) if "cu_seqlens" in batch else None
+        )
+        if cu_seqlens is not None:
+            position_ids = prepare_position_ids(cu_seqlens).to(torch.int32)
+        else:
+            position_ids = (
+                torch.arange(0, input_ids.shape[1], device=device_type)
+                .repeat(input_ids.shape[0], 1)
+                .to(torch.int32)
+            )
+        optional_context_parallel_ctx = (
+            dist_utils.create_context_parallel_ctx(
+                cp_mesh=world_mesh["cp"],
+                cp_buffers=[input_ids, labels, position_ids],
+                cp_seq_dims=[1, 1, 1],
+                cp_no_restore_buffers={input_ids, labels, position_ids},
+                cp_rotate_method=job_config.experimental.context_parallel_rotate_method,
+            )
+            if parallel_dims.cp_enabled
+            else None
+        )
+        return input_ids, labels, cu_seqlens, position_ids, optional_context_parallel_ctx
+
+    def _compute_global_loss_stats(step_loss):
+        if (
+            parallel_dims.dp_replicate_enabled
+            or parallel_dims.dp_shard_enabled
+            or parallel_dims.cp_enabled
+        ):
+            detached_loss = step_loss.detach()
+            return (
+                dist_utils.dist_mean(detached_loss, world_mesh["dp_cp"]),
+                dist_utils.dist_max(detached_loss, world_mesh["dp_cp"]),
+            )
+        step_loss_item = step_loss.item()
+        return step_loss_item, step_loss_item
+
+    def _to_float(value):
+        return value.item() if torch.is_tensor(value) else float(value)
+
     # variables used to keep info for metrics logging
     device_memory_monitor.reset_peak_stats()
 
@@ -441,6 +546,7 @@ def main(job_config: JobConfig):
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
                 input_ids, labels = batch["input_ids"], batch["labels"]
+                # logger.info(f"input_ids shape {input_ids.shape} and labels shape {labels.shape}")
 
                 # Update metrics processor state before forward/backward
                 metric_logger.ntokens_since_last_log += labels.numel()
@@ -554,28 +660,58 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
+            validation_extra_metrics = {}
+            should_run_validation = validation_dataloader is not None and (
+                train_state.step % job_config.training.validation_interval == 0
+                or train_state.step == job_config.training.steps
+            )
+            if should_run_validation:
+                model_was_training = model.training
+                model.eval()
+                validation_losses = []
+                with torch.no_grad():
+                    for _ in range(job_config.training.validation_steps):
+                        try:
+                            validation_batch = next(validation_data_iterator)
+                        except StopIteration:
+                            validation_data_iterator = iter(validation_dataloader)
+                            validation_batch = next(validation_data_iterator)
+                        (
+                            val_input_ids,
+                            val_labels,
+                            val_cu_seqlens,
+                            val_position_ids,
+                            val_optional_context_parallel_ctx,
+                        ) = _prepare_batch_inputs(validation_batch)
+                        with train_context(val_optional_context_parallel_ctx):
+                            with maybe_enable_amp:
+                                val_output = model(
+                                    input_ids=val_input_ids,
+                                    labels=val_labels,
+                                    position_ids=val_position_ids,
+                                    cu_seqlens=val_cu_seqlens,
+                                )
+                        validation_losses.append(val_output.loss.detach())
+                if model_was_training:
+                    model.train()
+
+                if validation_losses:
+                    validation_loss = torch.mean(torch.stack(validation_losses))
+                    validation_avg_loss, validation_max_loss = _compute_global_loss_stats(
+                        validation_loss
+                    )
+                    validation_extra_metrics = {
+                        "validation/loss": _to_float(validation_avg_loss),
+                        "validation/max_loss": _to_float(validation_max_loss),
+                    }
+                    logger.info(
+                        f"{color.cyan}validation: loss={_to_float(validation_avg_loss):.6f} "
+                        f"max_loss={_to_float(validation_max_loss):.6f}{color.reset}"
+                    )
+
             # log metrics - Use MetricsProcessor
             if metric_logger.should_log(train_state.step):
-                if (
-                    parallel_dims.dp_replicate_enabled
-                    or parallel_dims.dp_shard_enabled
-                    or parallel_dims.cp_enabled
-                ):
-                    loss = loss.detach()
-                    # Use dist_mean/max on the accumulated loss for the step
-                    global_avg_loss, global_max_loss = (
-                        dist_utils.dist_mean(
-                            loss,
-                            world_mesh["dp_cp"],
-                        ),
-                        dist_utils.dist_max(
-                            loss,
-                            world_mesh["dp_cp"],
-                        ),
-                    )
-                else:
-                    # Scale back the loss before logging
-                    global_avg_loss = global_max_loss = loss.item()
+                global_avg_loss, global_max_loss = _compute_global_loss_stats(loss)
 
                 # Update train state tokens and elapsed time
                 time_now = time.perf_counter()
@@ -599,20 +735,31 @@ def main(job_config: JobConfig):
                     * (job_config.training.steps - train_state.step)
                     / train_state.step
                 )
+                extra_metrics = {
+                    "optimizer/lr": last_lr,
+                    "optimizer/grad_norm": grad_norm.item(),
+                    "optimizer/skipped_step": train_state.skipped_step,
+                }
+                extra_metrics.update(validation_extra_metrics)
                 metric_logger.log(
                     train_state.step,
                     global_avg_loss,
                     global_max_loss,
-                    extra_metrics={
-                        "optimizer/lr": last_lr,
-                        "optimizer/grad_norm": grad_norm.item(),
-                        "optimizer/skipped_step": train_state.skipped_step,
-                    },
+                    extra_metrics=extra_metrics,
                 )
 
                 logger.info(
                     f"{color.blue}lr: {last_lr:.4e} gnorm: {grad_norm:5.2f} "
                     f"{color.magenta}[{str(train_state.elapsed).split('.')[0]:>8}<{str(eta).split('.')[0]:>8}]{color.reset}"
+                )
+            elif validation_extra_metrics:
+                # Emit validation metrics even when this isn't a regular training log step.
+                global_avg_loss, global_max_loss = _compute_global_loss_stats(loss)
+                metric_logger.log(
+                    train_state.step,
+                    global_avg_loss,
+                    global_max_loss,
+                    extra_metrics=validation_extra_metrics,
                 )
 
             checkpoint.save(

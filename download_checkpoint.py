@@ -1,10 +1,10 @@
 import argparse
 import os
-from huggingface_hub import HfApi, HfFolder, snapshot_download
+from huggingface_hub import HfApi, snapshot_download
 
 def main(args):
     api = HfApi()
-    token = HfFolder.get_token()
+    # token = HfFolder.get_token()
     experiment_checkpoint_folder = os.path.join(args.experiment_checkpoint_folder, "checkpoint")
     os.makedirs(
         experiment_checkpoint_folder,
@@ -13,7 +13,7 @@ def main(args):
 
     snapshot_download(
         repo_id=args.repo_id, 
-        token=token,
+        # token=token,
         local_dir=experiment_checkpoint_folder,
     )
 
