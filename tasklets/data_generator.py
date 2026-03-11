@@ -11,14 +11,55 @@ def make_int_seq(length: int, vocab: List[int]) -> List[int]:
     # return [random.choice(vocab) for _ in range(length)]
     # ensure the random choices are done WITHOUT replacement
     if length > len(vocab):
-        raise ValueError("Length exceeds vocabulary size for unique sampling")
+        raise ValueError(f"Length exceeds vocabulary size for unique sampling: {length} > {len(vocab)}")
     return random.sample(vocab, length)
+
+# def make_choices_int_seq(length: int, vocab: List[int]) -> List[int]:
+#     # return [random.choice(vocab) for _ in range(length)]
+#     return random.choices(vocab, k=length)
 
 def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
     # make sure to have two different vocabularies for key and value
     key_vocab_size = vocab_size // 2
     keys = make_int_seq(seq_len, list(range(1, key_vocab_size + 1)))
     values = make_int_seq(seq_len, list(range(key_vocab_size + 1, vocab_size + 1)))
+    # interleave keys and values
+    s: List[int] = []
+    for k, v in zip(keys, values):
+        s.append(k)
+        s.append(v)
+    return s
+
+# def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
+#     # make sure to have two different vocabularies for key and value
+#     keys = make_int_seq(seq_len, list(range(1, vocab_size + 1)))
+#     values = make_choices_int_seq(seq_len, list(range(1, vocab_size + 1)))
+#     # interleave keys and values
+#     s: List[int] = []
+#     for k, v in zip(keys, values):
+#         s.append(k)
+#         s.append(v)
+#     return s
+
+def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int) -> List[int]:
+    # make sure to have two different vocabularies for key and value
+    key_vocab_size = vocab_size // 2 
+    val_vocab_size = vocab_size - key_vocab_size
+    key_nums = list(range(1, key_vocab_size + 1))
+    val_nums = list(range(key_vocab_size + 1, vocab_size + 1))
+    # create random blobs of maximum length within both key and value vocab, then interleave them
+    key_blobs = []
+    for _ in range(key_vocab_size):
+        blob_len = random.randint(1, window_size)
+        blob = random.sample(key_nums, min(blob_len, len(key_nums)))
+        key_blobs.append(blob)
+    val_blobs = []
+    for _ in range(val_vocab_size):
+        blob_len = random.randint(1, window_size)
+        blob = random.sample(val_nums, min(blob_len, len(val_nums)))
+        val_blobs.append(blob)
+    keys = make_int_seq(seq_len, key_blobs)
+    values = make_int_seq(seq_len, val_blobs)
     # interleave keys and values
     s: List[int] = []
     for k, v in zip(keys, values):
@@ -107,8 +148,9 @@ def gen_single_query_recall_sample(seq_len: int, vocab_size: int) -> Dict:
     # choose a query not in the last position and at an even index (to pick a key)
     pos = random.choice(range(0, len(s) - 2, 2))
     q = s[pos]
-    x = to_str(s) + ["|", str(q)]
-    y = ["_"] * (len(s) + 1) + [str(s[pos + 1])]
+    v = s[pos + 1]
+    x = to_str(s) + ["|", str(q), str(v)]
+    y = ["_"] * (len(s) + 2) + [str(v)]
     return {"x": x, "y": y}
 
 
@@ -122,10 +164,9 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     # queries separated by 'm'
     for i, q in enumerate(queries):
         x.append(str(q))
-        if i != len(queries) - 1:
-            x.append("?")
+        x.append("?")
     # total outputs = prefix length + delimiter '|' + 2 tokens per query
-    pad_len = len(s) + 2 * len(queries)
+    pad_len = len(s) + 1 + 2 * len(queries)
     y = ["_"] * pad_len
 
     # fill answer slots at end
@@ -140,97 +181,88 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     return {"x": x, "y": y}
 
 def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
-    s = make_recall_seq(seq_len, vocab_size)
-    max_start = seq_len - window_size - 1
-    if max_start < 0:
-        raise ValueError("Sequence too short for given window_size")
-    rand_size = random.randint(1, window_size)
-    start = random.randint(0, max_start)
-    pattern = s[start:start + rand_size]
-    x = to_str(s) + ["|"] + to_str(pattern)
-    answer = s[start + rand_size]
-    y = ["_"] * (len(s) + window_size + 1) + [str(answer)]
+    s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size) # this will be a list of lists (blobs)
+    # do something similar like the previous recall sample function but then flatten at the end
+    pos = random.choice(range(len(s) - 1)) # choose a random position in the flattened sequence, but we can only guarantee the successor if it's not in the last blob
+    q = s[pos]
+    v = s[pos + 1]
+    s_flat = []
+    for blob in s:
+        s_flat.extend(blob)
+    x = s_flat + ["|"] + q + v
+    y = ["_"] * (len(s_flat) + 1 + len(q)) + v
+    # then we have to make them all the same length
+    # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
+    max_len = window_size * len(s) + 1 + 2 * window_size
+    x = x + ["_"] * (max_len - len(x))
+    y = y + ["_"] * (max_len - len(y))
     return {"x": x, "y": y}
 
 def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
     # base sequence with occasional noise token
     # make sure to have two different vocabularies for key and value AND noise
     # make noise token vocab size scale with seq_len and noise_prob (but less than 1/3 of total vocab)
-    noise_vocab_size = min(vocab_size // 3, int(seq_len * noise_prob))
+    noise_seq_len = int(seq_len * noise_prob)
+    signal_seq_len = seq_len - noise_seq_len
+    noise_vocab_size = min(vocab_size // 3, noise_seq_len)
     seq_vocab_size = vocab_size - noise_vocab_size
     noise_vocab_start = seq_vocab_size + 1
-    s = make_recall_seq(seq_len, seq_vocab_size)
-    noisy_prefix: List[int] = []
-    for v in s:
-        noisy_prefix.append(v)
-        if random.random() < noise_prob:
-            # insert random noise token from same vocab
-            noisy_prefix.append(random.randint(noise_vocab_start, vocab_size))
+    s = make_recall_seq(signal_seq_len, seq_vocab_size)
+    # insert noise_seq_len noise tokens at random positions in s
+    noise_prefix = s.copy()
+    for _ in range(noise_seq_len):
+        noise_token = random.randint(noise_vocab_start, vocab_size)
+        insert_pos = random.randint(0, len(s))
+        noise_prefix.insert(insert_pos, noise_token)
     # choose query positions on the original sequence to define the labels
     positions = sorted(random.sample(range(len(s) - 1), num_queries))
     queries = [s[p] for p in positions]
-    x = to_str(noisy_prefix) + ["|"]
+    x = to_str(noise_prefix) + ["|"]
     for i, q in enumerate(queries):
         x.append(str(q))
-        if i != len(queries) - 1:
-            x.append("?")
+        x.append("?")
+
+    # total outputs = prefix length + delimiter '|' + 2 tokens per query
+    pad_len = len(noise_prefix) + 1 + 2 * len(queries)
+    y = ["_"] * pad_len
+
+    # fill answer slots at end
     answers = []
     for pos in positions:
-        answers.append(str(s[pos + 1]))
+        answers.append(str(s[pos + 1]))  # successor
         answers.append("_")
-    answers = answers[:-1]  # remove last underscore
-
-    y = ["_"] * (len(noisy_prefix) + 1 + len(answers))
+    # remove last underscore
+    answers = answers[:-1]
     y[-len(answers):] = answers
     return {"x": x, "y": y}
 
 # === Copy tasks ===
 
 def gen_full_copy_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    x = to_str(s) + ["|"] + to_str(s[:-1])  # context + partial copy
+    s = make_int_seq(seq_len, list(range(1, vocab_size + 1)))
+    x = to_str(s) + ["|"] + to_str(s)  # context + partial copy
     y = ["_"] * (len(s) + 1) + to_str(s)
     return {"x": x, "y": y}
 
-def gen_full_copy_test_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    x = to_str(s) + ["|"]
-    y = to_str(s)
-    # we supervise all outputs
-    m = [1] * len(y)
-    return {"x": x, "y": y, "m": m}
-
 def gen_reverse_copy_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
+    s = make_int_seq(seq_len, list(range(1, vocab_size + 1)))
     rev = list(reversed(s))
-    x = to_str(s) + ["|"] + to_str(rev[1:])
-    y = to_str(s[1:]) + ["|"] + to_str(rev)
-    m = [0] * (len(s)) + [1] * len(s)
-    return {"x": x, "y": y, "m": m}
+    x = to_str(s) + ["|"] + to_str(rev)  # context + partial copy
+    y = ["_"] * (len(s) + 1) + to_str(rev)
+    return {"x": x, "y": y}
 
-def gen_reverse_copy_test_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    rev = list(reversed(s))
-    x = to_str(s) + ["|"]
-    y = to_str(rev)
-    m = [1] * len(y)
-    return {"x": x, "y": y, "m": m}
-
-def gen_selective_copy_sample(seq_len: int, vocab_size: int, prob_n: float) -> Dict:
-    seq: List[str] = []
-    for _ in range(seq_len):
-        if random.random() < prob_n:
-            seq.append("n")
-        else:
-            seq.append(str(random.randint(1, vocab_size)))
-    # ensure at least one numeric token
-    if not any(t != "n" for t in seq):
-        idx = random.randrange(seq_len)
-        seq[idx] = "1"
-    x = seq + ["|"]
-    y = [t for t in seq if t != "n"]
-    m = [1] * len(y)
-    return {"x": x, "y": y, "m": m}
+def gen_selective_copy_sample(seq_len: int, vocab_size: int, noise_prob: float) -> Dict:
+    # just make usual copy sample then insert noise tokens "n"
+    signal_seq_len = int(seq_len * (1 - noise_prob))
+    noise_seq_len = seq_len - signal_seq_len
+    s = make_int_seq(signal_seq_len, list(range(1, vocab_size + 1)))
+    noise_prefix = s.copy()
+    for _ in range(noise_seq_len):
+        insert_pos = random.randint(0, len(noise_prefix))
+        noise_prefix.insert(insert_pos, "n")
+    x = to_str(noise_prefix) + ["|"] + to_str(s)  # context + partial copy
+    y = ["_"] * (len(noise_prefix) + 1) + to_str(s)
+    return {"x": x, "y": y}
 
 # === Memorization ===
 
@@ -327,30 +359,6 @@ def make_memorization_sample_fns(
 
     return train_sample_fn, test_sample_fn
 
-# === Reversal (predecessor lookup) ===
-
-def gen_reversal_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    pos = random.randint(1, seq_len - 1)
-    q = s[pos]
-    prev_token = s[pos - 1]
-    x = to_str(s) + ["|", str(q)]
-    y_prefix = to_str(s[1:])
-    y = y_prefix + ["|", str(q), str(prev_token)]
-    m = [0] * len(y)
-    m[-1] = 1
-    return {"x": x, "y": y, "m": m}
-
-def gen_reversal_test_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    pos = random.randint(1, seq_len - 1)
-    q = s[pos]
-    prev_token = s[pos - 1]
-    x = to_str(s) + ["|", str(q)]
-    y = [str(prev_token)]
-    m = [1]
-    return {"x": x, "y": y, "m": m}
-
 # === Sorting (sort pairs by letter) ===
 
 def gen_sorting_sample(num_pairs: int) -> Dict:
@@ -427,8 +435,6 @@ def build_arg_parser():
                         help="Window size for fuzzy recall.")
     parser.add_argument("--noise-prob", type=float, default=0.2,
                         help="Noise probability for noisy recall.")
-    parser.add_argument("--prob-n", type=float, default=0.5,
-                        help="Probability of 'n' token in selective copy.")
     parser.add_argument("--num-pairs", type=int, default=4,
                         help="Number of key-value pairs / pairs in some tasks.")
     parser.add_argument("--upload-to-hf", action="store_true",
@@ -464,20 +470,17 @@ def main():
         )
     elif args.task == "full_copy":
         train_sample_fn = lambda: gen_full_copy_sample(args.seq_len, args.vocab_size)
-        test_sample_fn = lambda: gen_full_copy_test_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_full_copy_sample(args.seq_len, args.vocab_size)
     elif args.task == "reverse_copy":
         train_sample_fn = lambda: gen_reverse_copy_sample(args.seq_len, args.vocab_size)
-        test_sample_fn = lambda: gen_reverse_copy_test_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_reverse_copy_sample(args.seq_len, args.vocab_size)
     elif args.task == "selective_copy":
-        train_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
-        test_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.prob_n)
+        train_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.noise_prob)
+        test_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.noise_prob)
     elif args.task == "memorization":
         train_sample_fn, test_sample_fn = make_memorization_sample_fns(
             vocab_size=args.vocab_size, num_pairs=args.num_pairs
         )
-    elif args.task == "reversal":
-        train_sample_fn = lambda: gen_reversal_sample(args.seq_len, args.vocab_size)
-        test_sample_fn = lambda: gen_reversal_test_sample(args.seq_len, args.vocab_size)
     elif args.task == "sorting":
         train_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
         test_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
