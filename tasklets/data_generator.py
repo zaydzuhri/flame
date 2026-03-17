@@ -5,8 +5,6 @@ import random
 from typing import List, Dict, Tuple, Callable
 from tqdm import tqdm
 
-Token = str
-
 def make_int_seq(length: int, vocab: List[int]) -> List[int]:
     # return [random.choice(vocab) for _ in range(length)]
     # ensure the random choices are done WITHOUT replacement
@@ -14,9 +12,9 @@ def make_int_seq(length: int, vocab: List[int]) -> List[int]:
         raise ValueError(f"Length exceeds vocabulary size for unique sampling: {length} > {len(vocab)}")
     return random.sample(vocab, length)
 
-# def make_choices_int_seq(length: int, vocab: List[int]) -> List[int]:
-#     # return [random.choice(vocab) for _ in range(length)]
-#     return random.choices(vocab, k=length)
+def make_choices_int_seq(length: int, vocab: List[int]) -> List[int]:
+    # return [random.choice(vocab) for _ in range(length)]
+    return random.choices(vocab, k=length)
 
 def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
     # make sure to have two different vocabularies for key and value
@@ -143,6 +141,9 @@ def write_dataset_streaming(
 # === Recall tasks ===
 
 def gen_single_query_recall_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: 1 2 3 4 5 6 | 3 4
+    # y: _ _ _ _ _ _ _ _ 4
     # make sure to have two different vocabularies for key and value
     s = make_recall_seq(seq_len, vocab_size)
     # choose a query not in the last position and at an even index (to pick a key)
@@ -155,6 +156,9 @@ def gen_single_query_recall_sample(seq_len: int, vocab_size: int) -> Dict:
 
 
 def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: int) -> Dict:
+    # output:
+    # x: 1 2 3 4 5 6 | 3 4 1 2
+    # y: _ _ _ _ _ _ _ _ 4 _ 2
     # make sure to have two different vocabularies for key and value
     s = make_recall_seq(seq_len, vocab_size)
     # sample distinct positions, avoid last index for successor
@@ -181,6 +185,9 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     return {"x": x, "y": y}
 
 def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
+    # output:
+    # x: 1 2 3 4 5 6 | 2 3 4 5
+    # y: _ _ _ _ _ _ _ _ _ _ 5
     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size) # this will be a list of lists (blobs)
     # do something similar like the previous recall sample function but then flatten at the end
     pos = random.choice(range(len(s) - 1)) # choose a random position in the flattened sequence, but we can only guarantee the successor if it's not in the last blob
@@ -199,6 +206,9 @@ def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> 
     return {"x": x, "y": y}
 
 def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
+    # output:
+    # x: 1 2 8 3 4 5 6 | 3 4 7 1 2
+    # y: _ _ _ _ _ _ _ _ _ 4 _ _ 2
     # base sequence with occasional noise token
     # make sure to have two different vocabularies for key and value AND noise
     # make noise token vocab size scale with seq_len and noise_prob (but less than 1/3 of total vocab)
@@ -239,6 +249,9 @@ def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noi
 # === Copy tasks ===
 
 def gen_full_copy_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: 1 2 3 4 5 6 | 1 2 3 4 5 6
+    # y: _ _ _ _ _ _ _ 1 2 3 4 5 6
     s = make_int_seq(seq_len, list(range(1, vocab_size + 1)))
     x = to_str(s) + ["|"] + to_str(s)  # context + partial copy
     y = ["_"] * (len(s) + 1) + to_str(s)
@@ -252,6 +265,9 @@ def gen_reverse_copy_sample(seq_len: int, vocab_size: int) -> Dict:
     return {"x": x, "y": y}
 
 def gen_selective_copy_sample(seq_len: int, vocab_size: int, noise_prob: float) -> Dict:
+    # output:
+    # x: 1 2 n 3 4 n 5 6 | 1 2 3 4 5 6
+    # y: _ _ _ _ _ _ _ _ _ 1 2 3 4 5 6
     # just make usual copy sample then insert noise tokens "n"
     signal_seq_len = int(seq_len * (1 - noise_prob))
     noise_seq_len = seq_len - signal_seq_len
@@ -266,140 +282,313 @@ def gen_selective_copy_sample(seq_len: int, vocab_size: int, noise_prob: float) 
 
 # === Memorization ===
 
-def gen_memorization_dataset(vocab_size: int, num_pairs: int, num_test: int) -> Tuple[List[Dict], List[Dict]]:
-    # create a permutation-based mapping
-    keys = random.sample(range(1, vocab_size + 1), num_pairs)
-    remaining = [v for v in range(1, vocab_size + 1) if v not in keys]
-    if len(remaining) < num_pairs:
-        # allow reuse with a simple shift
-        values = [(k % vocab_size) + 1 for k in keys]
-    else:
-        values = random.sample(remaining, num_pairs)
-    pairs = list(zip(keys, values))
-
-    # training sample: single big sequence
-    train_x: List[str] = []
-    for i, (k, v) in enumerate(pairs):
-        train_x.extend([str(k), str(v)])
-        if i != len(pairs) - 1:
-            train_x.append("|")
-    train_y: List[str] = []
-    # First pair: only value then '|'
-    train_y.append(str(pairs[0][1]))
-    train_y.append("|")
-    for i in range(1, len(pairs)):
-        k, v = pairs[i]
-        train_y.extend([str(k), str(v), "|"])
-    # mask: 1 on numbers, 0 on '|'
-    m = [0 if t == "|" else 1 for t in train_y]
-    train_samples = [{"x": train_x, "y": train_y, "m": m}]
-
-    # test samples: query keys in random order
-    test_samples: List[Dict] = []
-    for _ in range(num_test):
-        # pick a subset of keys to query
-        q_keys = random.sample(keys, min(4, len(keys)))
-        x: List[str] = []
-        for i, k in enumerate(q_keys):
-            x.append(str(k))
-            x.append("m")
-            if i != len(q_keys) - 1:
-                x.append("|")
-        y: List[str] = []
-        for k in q_keys:
-            v = dict(pairs)[k]
-            y.extend([str(v), "_", "_"])
-        m_y = [1 if t not in ["|", "_"] else 0 for t in y]
-        test_samples.append({"x": x, "y": y, "m": m_y})
-    return train_samples, test_samples
-
+def make_memorization_table(
+    num_keys: int,
+    key_len: int,
+    vocab_size: int,
+) -> Dict[Tuple[int, ...], int]:
+    # create a list of num_keys unique keys, each key is a list of tokens of length key_len
+    # to make sure the keys are unique, we can just incrementally generate them from the vocab
+    vocab = list(range(1, vocab_size + 1))
+    # doing it cheaply by keeping track of indices in the vocab for each position in the key
+    key_indices = [0] * key_len
+    keys = []
+    for _ in range(num_keys):
+        key = [vocab[i] for i in key_indices]
+        keys.append(key)
+        # increment the key indices, last one first like counting
+        if key_indices[-1] < vocab_size - 1:
+            key_indices[-1] += 1
+        else:            # need to carry over
+            for j in range(key_len - 1, -1, -1):
+                if key_indices[j] < vocab_size - 1:
+                    key_indices[j] += 1
+                    break
+                else:
+                    key_indices[j] = 0
+    # assign random values to each key, doesn't matter if they overlap
+    table = {}    
+    for key in keys:
+        value = random.randint(1, vocab_size)
+        table[tuple(key)] = value
+    return table
 
 def make_memorization_sample_fns(
-    vocab_size: int,
-    num_pairs: int,
+    seq_len: int,
+    key_len: int,
+    table: Dict[Tuple[int, ...], int]
 ) -> Tuple[Callable[[], Dict], Callable[[], Dict]]:
-    # create a permutation-based mapping once, then sample queries from it repeatedly
-    keys = random.sample(range(1, vocab_size + 1), num_pairs)
-    remaining = [v for v in range(1, vocab_size + 1) if v not in keys]
-    if len(remaining) < num_pairs:
-        values = [(k % vocab_size) + 1 for k in keys]
-    else:
-        values = random.sample(remaining, num_pairs)
-    mapping = dict(zip(keys, values))
-
-    train_x: List[str] = []
-    for i, (k, v) in enumerate(mapping.items()):
-        train_x.extend([str(k), str(v)])
-        if i != len(mapping) - 1:
-            train_x.append("|")
-    train_y: List[str] = [str(mapping[keys[0]]), "|"]
-    for i in range(1, len(keys)):
-        k = keys[i]
-        v = mapping[k]
-        train_y.extend([str(k), str(v), "|"])
-    train_m = [0 if t == "|" else 1 for t in train_y]
-    fixed_train_sample = {"x": train_x, "y": train_y, "m": train_m}
-
-    def train_sample_fn() -> Dict:
-        return fixed_train_sample
-
-    def test_sample_fn() -> Dict:
-        q_keys = random.sample(keys, min(4, len(keys)))
-        x: List[str] = []
-        for i, k in enumerate(q_keys):
-            x.append(str(k))
-            x.append("m")
-            if i != len(q_keys) - 1:
-                x.append("|")
-        y: List[str] = []
-        for k in q_keys:
-            y.extend([str(mapping[k]), "_", "_"])
-        m_y = [1 if t not in ["|", "_"] else 0 for t in y]
-        return {"x": x, "y": y, "m": m_y}
-
-    return train_sample_fn, test_sample_fn
-
-# === Sorting (sort pairs by letter) ===
-
-def gen_sorting_sample(num_pairs: int) -> Dict:
-    letters = [chr(ord("a") + i) for i in range(26)]
-    used_letters = random.sample(letters, num_pairs)
-    nums = random.sample(range(1, 100), num_pairs)
-    pairs = list(zip(nums, used_letters))
-    random.shuffle(pairs)
-    x: List[str] = []
-    for n, ch in pairs:
-        x.extend([str(n), ch])
-    x.append("|")
-    # sort by letter
-    sorted_pairs = sorted(pairs, key=lambda p: p[1])
-    y: List[str] = []
-    for n, ch in sorted_pairs:
-        y.extend([str(n), ch])
-    m = [1] * len(y)
-    return {"x": x, "y": y, "m": m}
+    # output:
+    # x: 1 2 3 | 3 4 5 | 6 7 8 |
+    # y: _ _ 3 _ _ _ 5 _ _ _ 8 _
+    # to create a sample, just get a number of key value pairs from the table and concatenate them with "|" in between
+    num_pairs = seq_len // key_len + 2
+    x = []
+    y = []
+    for _ in range(num_pairs):
+        key = random.choice(list(table.keys()))
+        value = table[key]
+        x.extend(key)
+        y.extend(["_"] * len(key))
+        x.append(value)
+        y.append(value)
+        x.append("|")
+        y.append("_")
+    return {"x": x, "y": y}
 
 # === Counting (count occurrences of a query token) ===
 
-def gen_counting_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    q = random.choice(s)
-    count_q = s.count(q)
-    x = to_str(s) + ["|", str(q)]
-    y_prefix = to_str(s[1:])
-    y = y_prefix + ["|", str(q), str(count_q)]
-    m = [0] * len(y)
-    m[-1] = 1
-    return {"x": x, "y": y, "m": m}
+def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int) -> Dict:
+    # output:
+    # x: 3 4 4 1 3 4 | 4 3
+    # y: _ _ _ _ _ _ _ _ 3
+    count = random.randint(1, min(seq_len - 1, vocab_size - 1, max_count))
+    query_token = random.randint(1, vocab_size)
+    # make sure the query token appears count times in the sequence
+    vocab_other = [i for i in range(1, vocab_size + 1) if i != query_token]
+    seq = make_choices_int_seq(seq_len - count, vocab_other)
+    for _ in range(count):
+        insert_pos = random.randint(0, len(seq))
+        seq.insert(insert_pos, query_token)
+    x = to_str(seq) + ["|", str(query_token), str(count)]
+    y = ["_"] * (len(seq) + 2) + [str(count)]
+    return {"x": x, "y": y}
 
-def gen_counting_test_sample(seq_len: int, vocab_size: int) -> Dict:
-    s = make_int_seq(seq_len, vocab_size)
-    q = random.choice(s)
-    count_q = s.count(q)
-    x = to_str(s) + ["|", str(q)]
-    y = [str(count_q)]
-    m = [1]
-    return {"x": x, "y": y, "m": m}
+# === Sorting (sort tokens by count) ===
+
+def gen_sorting_sample(seq_len: int, vocab_size: int, num_unique_toks: int) -> Dict:
+    # output:
+    # x: 1 2 1 3 1 0 3 1 3 2 | 1 3 2 0
+    # y: _ _ _ _ _ _ _ _ _ _ _ 1 3 2 0
+    assert num_unique_toks <= seq_len, "Need at least 1 position per token"
+
+    # Pick distinct tokens
+    toks = random.sample(range(1, vocab_size + 1), num_unique_toks)
+
+    # Pick strictly unique counts that sum to seq_len
+    # Step 1: sample distinct positive integers
+    counts = random.sample(range(1, seq_len + 1), num_unique_toks)
+
+    # Step 2: rescale to sum to seq_len
+    total = sum(counts)
+    counts = [max(1, c * seq_len // total) for c in counts]
+
+    # Fix rounding drift so total == seq_len
+    diff = seq_len - sum(counts)
+    counts[0] += diff
+
+    # Ensure uniqueness (simple retry if scaling broke it)
+    if len(set(counts)) != len(counts):
+        return gen_sorting_sample(seq_len, vocab_size, num_unique_toks)
+
+    # Build sequence
+    seq = []
+    for tok, count in zip(toks, counts):
+        seq.extend([tok] * count)
+
+    random.shuffle(seq)
+
+    count_dict = dict(zip(toks, counts))
+    sorted_toks = sorted(toks, key=lambda t: count_dict[t], reverse=True)
+
+    x = to_str(seq) + ["|"] + to_str(sorted_toks)
+    y = ["_"] * (len(seq) + 1) + to_str(sorted_toks)
+
+    return {"x": x, "y": y}
+
+# === State-tracking tasks ===
+
+def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: i 2 i 1 o 1 o 2 i 4 o 4
+    # y: _ _ _ __  1 _ 2 _ _ _ 4
+    x = []
+    y = []
+    stack = []
+    for _ in range(seq_len//2):
+        # sample operation (but only allow pop if stack is not empty)
+        if len(stack) == 0:
+            op = "i"
+        else:
+            op = random.choice(["i", "o"])
+        if op == "i":
+            token = random.randint(1, vocab_size)
+            stack.append(token)
+            x.extend(["i", str(token)])
+            y.extend(["_", "_"])
+        else:
+            token = stack.pop()
+            x.extend(["o", str(token)])
+            y.extend(["_", str(token)])
+    return {"x": x, "y": y}
+
+def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
+    # output:
+    # x: i 0 2 i 1 1 o 0 2 o 1 1 i 0 4 o 0 4
+    # y: _ _ _ _ _ _ _ _ 2 _ _ 1 _ _ _ _ _ 4
+    x = []
+    y = []
+    stacks = [[] for _ in range(num_stacks)]
+    for _ in range(seq_len//3):
+        # sample stack and operation (but only allow pop if stack is not empty)
+        stack_idx = random.randint(0, num_stacks - 1)
+        if len(stacks[stack_idx]) == 0:
+            op = "i"
+        else:
+            op = random.choice(["i", "o"])
+        if op == "i":
+            token = random.randint(1, vocab_size)
+            stacks[stack_idx].append(token)
+            x.extend(["i", str(stack_idx), str(token)])
+            y.extend(["_", "_", "_"])
+        else:
+            token = stacks[stack_idx].pop()
+            x.extend(["o", str(stack_idx), str(token)])
+            y.extend(["_", "_", str(token)])
+    return {"x": x, "y": y}
+
+def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: w 0 i 1 r 0 i 0 w 1 r 1
+    # y: _ _ _ _ _ 0 _ _ _ _ _ 1
+    x = []
+    y = []
+    state = None
+    for i in range(seq_len//2):
+        op_choices = ["w"] if state is None else ["r", "i", "i"]
+        # make sure that the last op is "r", so we also need to make sure there is a state written at the second to last step
+        if i == seq_len//2 - 1 and state is not None:
+            op = "r"
+        elif i == seq_len//2 - 2 and state is None:
+            op = "w"
+        elif i == seq_len//2 - 2 and state is not None:
+            op = "i"
+        else:
+            op = random.choice(op_choices)
+        token = random.randint(1, vocab_size)
+        if op == "w":
+            x.extend([op, str(token)])
+            y.extend(["_", "_"])
+            state = token
+        elif op == "r":
+            x.extend([op, str(state)])
+            y.extend(["_", str(state)])
+            state = None
+        else:
+            x.extend([op, str(token)])
+            y.extend(["_", "_"])
+    return {"x": x, "y": y}
+
+# === Formal language tasks ===
+
+def gen_valid_dyck(seq_len: int) -> List[str]:
+    """Generate a valid Dyck sequence of exact length seq_len (must be even)."""
+    assert seq_len % 2 == 0, "Valid Dyck sequences must have even length"
+
+    stack = 0
+    seq = []
+
+    for i in range(seq_len):
+        remaining = seq_len - i
+
+        # If we must close to finish properly
+        if stack == remaining:
+            seq.append(")")
+            stack -= 1
+        elif stack == 0:
+            seq.append("(")
+            stack += 1
+        else:
+            # Randomly choose open or close
+            if random.random() < 0.5:
+                seq.append("(")
+                stack += 1
+            else:
+                seq.append(")")
+                stack -= 1
+
+    return seq
+
+
+def gen_invalid_dyck(seq_len: int) -> List[str]:
+    """Generate an invalid Dyck sequence."""
+    # Start from a valid one, then corrupt it
+    if seq_len % 2 != 0:
+        # Odd length is automatically invalid
+        return [random.choice(["(", ")"]) for _ in range(seq_len)]
+
+    seq = gen_valid_dyck(seq_len)
+
+    # Introduce an error
+    error_type = random.choice(["flip", "prefix_break", "extra_open"])
+
+    if error_type == "flip":
+        # Flip one bracket
+        i = random.randrange(seq_len)
+        seq[i] = "(" if seq[i] == ")" else ")"
+
+    elif error_type == "prefix_break":
+        # Force invalid prefix (more closing than opening early)
+        seq[0] = ")"
+
+    elif error_type == "extra_open":
+        # Replace a closing with opening → imbalance
+        closes = [i for i, c in enumerate(seq) if c == ")"]
+        if closes:
+            i = random.choice(closes)
+            seq[i] = "("
+
+    return seq
+
+def gen_dyck_language_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output: 
+    # x: ( ( ) ) ( ) | 1 
+    # y: _ _ _ _ _ _ _ 1 
+    # we want an equal number of correct vs incorrect samples so sample the label first
+    label = random.choice([0, 1])
+
+    if label == 1:
+        # Ensure valid sequence
+        if seq_len % 2 != 0:
+            seq_len += 1  # fix to even
+        x = gen_valid_dyck(seq_len)
+    else:
+        x = gen_invalid_dyck(seq_len)
+
+    y = ["_"] * (len(x) + 1) + [str(label)]
+    x = x + ["|", str(label)]
+
+    return {"x": x, "y": y}
+
+def gen_anbncn_language_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: a a b b c c | 1
+    # y: _ _ _ _ _ _ _ 1
+    # we want an equal number of correct vs incorrect samples
+    # so sample the label first
+    label = random.choice([0, 1])
+    if label == 1:
+        n = random.randint(1, seq_len // 3)
+        x = ["a"] * n + ["b"] * n + ["c"] * n
+        # pad the left side
+        x = ["_"] * (seq_len - len(x)) + x
+        x = x + ["|", str(label)]
+        y = ["_"] * (len(x) - 1) + [str(label)]
+    else:
+        an = random.randint(1, seq_len // 3)
+        bn = random.randint(1, seq_len // 3)
+        cn = random.randint(1, seq_len // 3)
+        # make sure it's not the case that an == bn == cn
+        while an == bn == cn:
+            an = random.randint(1, seq_len // 3)
+            bn = random.randint(1, seq_len // 3)
+            cn = random.randint(1, seq_len // 3)
+        x = ["a"] * an + ["b"] * bn + ["c"] * cn
+        # pad the left side
+        x = ["_"] * (seq_len - len(x)) + x
+        x = x + ["|", str(label)]
+        y = ["_"] * (len(x) - 1) + [str(label)]
+    return {"x": x, "y": y}
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Generate synthetic sequence tasks.")
@@ -414,6 +603,11 @@ def build_arg_parser():
                             "selective_copy",
                             "memorization",
                             "reversal",
+                            "single_stack_ops",
+                            "multi_stack_ops",
+                            "flip_flop",
+                            "dyck_language",
+                            "anbncn_language",
                             "sorting",
                             "counting",
                         ],
@@ -437,6 +631,16 @@ def build_arg_parser():
                         help="Noise probability for noisy recall.")
     parser.add_argument("--num-pairs", type=int, default=4,
                         help="Number of key-value pairs / pairs in some tasks.")
+    parser.add_argument("--num-keys", type=int, default=100,
+                        help="Number of unique keys for memorization task.")
+    parser.add_argument("--key-len", type=int, default=3, 
+                        help="Length of each key sequence for memorization task.")
+    parser.add_argument("--max-count", type=int, default=10,
+                        help="Maximum count for counting task.")
+    parser.add_argument("--num-unique-toks", type=int, default=5,
+                        help="Number of unique tokens for sorting task.")
+    parser.add_argument("--num-stacks", type=int, default=2,
+                        help="Number of stacks for the multi-stack operations task.")
     parser.add_argument("--upload-to-hf", action="store_true",
                         help="Upload generated train/test splits to the Hugging Face Hub.")
     parser.add_argument("--hf-repo-id", type=str, default=None,
@@ -478,15 +682,30 @@ def main():
         train_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.noise_prob)
         test_sample_fn = lambda: gen_selective_copy_sample(args.seq_len, args.vocab_size, args.noise_prob)
     elif args.task == "memorization":
-        train_sample_fn, test_sample_fn = make_memorization_sample_fns(
-            vocab_size=args.vocab_size, num_pairs=args.num_pairs
-        )
-    elif args.task == "sorting":
-        train_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
-        test_sample_fn = lambda: gen_sorting_sample(args.num_pairs)
+        table = make_memorization_table(args.num_keys, args.key_len, args.vocab_size)
+        train_sample_fn = lambda: make_memorization_sample_fns(args.seq_len, args.key_len, table)
+        test_sample_fn = lambda: make_memorization_sample_fns(args.seq_len, args.key_len, table)
     elif args.task == "counting":
-        train_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size)
-        test_sample_fn = lambda: gen_counting_test_sample(args.seq_len, args.vocab_size)
+        train_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count)
+        test_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count)
+    elif args.task == "sorting":
+        train_sample_fn = lambda: gen_sorting_sample(args.seq_len, args.vocab_size, args.num_unique_toks)
+        test_sample_fn = lambda: gen_sorting_sample(args.seq_len, args.vocab_size, args.num_unique_toks)
+    elif args.task == "single_stack_ops":
+        train_sample_fn = lambda: gen_single_stack_ops_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_single_stack_ops_sample(args.seq_len, args.vocab_size)
+    elif args.task == "multi_stack_ops":
+        train_sample_fn = lambda: gen_multi_stack_ops_sample(args.seq_len, args.vocab_size, args.num_stacks)
+        test_sample_fn = lambda: gen_multi_stack_ops_sample(args.seq_len, args.vocab_size, args.num_stacks)
+    elif args.task == "flip_flop":
+        train_sample_fn = lambda: gen_flip_flop_language_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_flip_flop_language_sample(args.seq_len, args.vocab_size)
+    elif args.task == "dyck_language":
+        train_sample_fn = lambda: gen_dyck_language_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_dyck_language_sample(args.seq_len, args.vocab_size)
+    elif args.task == "anbncn_language":
+        train_sample_fn = lambda: gen_anbncn_language_sample(args.seq_len, args.vocab_size)
+        test_sample_fn = lambda: gen_anbncn_language_sample(args.seq_len, args.vocab_size)
     else:
         raise ValueError(f"Unknown task {args.task}")
 
