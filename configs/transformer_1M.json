@@ -14,5 +14,5 @@
     "norm_eps": 1e-06,
     "tie_word_embeddings": false,
     "use_cache": true,
-    "vocab_size": 334
+    "vocab_size": 134
 }
