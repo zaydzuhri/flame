@@ -26,7 +26,7 @@
     "fuse_norm": true,
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
-    "use_l2warp": true,
+    "use_l2warp": false,
     "vocab_size": 32000,
     "value_dim": null
 }

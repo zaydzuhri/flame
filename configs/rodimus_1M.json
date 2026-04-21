@@ -4,7 +4,7 @@
     "hidden_size": 128,
     "num_hidden_layers": 4,
     "attn_mode": "chunk",
-    "residual_in_fp32": true,
+    "residual_in_fp32": false,
     "block_residual_in_fp32": false,
     "expand_ratio": 16,
     "input_gate_low_rank": "auto",
@@ -17,7 +17,10 @@
     "norm_eps": 1e-5,
     "k_norm_eps": null,
     "attn": null,
-    "ska_attn": null,
+    "ska_attn": {
+        "num_heads": 2,
+        "head_dim": 64
+    },
     "use_cache": true,
     "pad_token_id": null,
     "bos_token_id": 126080,

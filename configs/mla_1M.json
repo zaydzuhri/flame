@@ -6,7 +6,7 @@
     "q_lora_rank": 16,
     "qk_rope_head_dim": 16,
     "kv_lora_rank": 32,
-    "v_head_dim": 64,
+    "v_head_dim": 16,
     "qk_nope_head_dim": 16,
     "qk_head_dim": 32,
     "window_size": null,
