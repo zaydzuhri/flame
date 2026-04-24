@@ -73,6 +73,7 @@ def resolve_data_backend(data_backend: str):
 @record
 def main(job_config: JobConfig):
     logger.info(f"Starting job: {job_config.job.description}")
+    checkpoint_disabled = job_config.checkpoint.disable_checkpoint
     data_backend = job_config.training.data_backend
     build_dataset_fn, build_dataloader_fn = resolve_data_backend(data_backend)
     logger.info(f"Using data backend: {data_backend} ({build_dataset_fn.__module__})")
@@ -97,8 +98,10 @@ def main(job_config: JobConfig):
     device_module.set_device(device)
     ft_manager = init_ft_manager(job_config)
 
+    if checkpoint_disabled:
+        logger.info("Checkpointing is disabled; checkpoint load/save paths will be skipped.")
     run_specific_repo_id = None
-    if getattr(job_config.checkpoint, "hf_upload_enabled", False):
+    if not checkpoint_disabled and getattr(job_config.checkpoint, "hf_upload_enabled", False):
         hf_repo_base = getattr(job_config.checkpoint, "hf_repo_base_name", None)
         if hf_repo_base:
             # Generate timestamp (adjust format if desired)
@@ -205,7 +208,7 @@ def main(job_config: JobConfig):
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
-        snapshot_every_n_steps=job_config.checkpoint.interval,
+        snapshot_every_n_steps=job_config.checkpoint.interval if not checkpoint_disabled else None,
     )
     validation_dataloader = None
     validation_data_iterator = None
@@ -391,28 +394,34 @@ def main(job_config: JobConfig):
     train_state = TrainState()
 
     # load initial checkpoint
-    checkpoint = CheckpointManager(
-        dataloader=dataloader,
-        model_parts=model_parts,
-        optimizers=optimizers,
-        lr_schedulers=lr_schedulers,
-        states={"train_state": train_state},
-        job_config=job_config,
-        ft_manager=ft_manager,
-    )
+    checkpoint = None
+    print('CHECKPOINT ENABLED?', job_config.checkpoint.enable_checkpoint)
+    print('CHECKPOINT DISABLED?', checkpoint_disabled)
+    print('CHECKPOINT VARIABLE:', checkpoint)
+    if not checkpoint_disabled:
+        checkpoint = CheckpointManager(
+            dataloader=dataloader,
+            model_parts=model_parts,
+            optimizers=optimizers,
+            lr_schedulers=lr_schedulers,
+            states={"train_state": train_state},
+            job_config=job_config,
+            ft_manager=ft_manager,
+        )
 
     if job_config.checkpoint.create_seed_checkpoint:
         assert world_size == 1, (
             "Must create seed checkpoint using a single device, to disable sharding"
         )
-        assert job_config.checkpoint.enable_checkpoint, (
+        assert checkpoint_enabled, (
             "Must enable checkpointing when creating a seed checkpoint"
         )
         checkpoint.save(curr_step=0, force=True)
         logger.info("Created seed checkpoint")
         return
 
-    checkpoint.load(step=job_config.checkpoint.load_step)
+    if not checkpoint_disabled:
+        checkpoint.load(step=job_config.checkpoint.load_step)
     metric_logger = build_metrics_processor(job_config, parallel_dims)
     # Set dependent attributes for metric_logger
     metric_logger.num_flops_per_token = num_flops_per_token
@@ -647,7 +656,8 @@ def main(job_config: JobConfig):
             )
 
             # optimizer step
-            checkpoint.maybe_wait_for_staging()
+            if not checkpoint_disabled:
+                checkpoint.maybe_wait_for_staging()
             if job_config.training.skip_nan_inf and (
                 grad_norm.isnan() or grad_norm.isinf()
             ):
@@ -762,12 +772,13 @@ def main(job_config: JobConfig):
                     extra_metrics=validation_extra_metrics,
                 )
 
-            checkpoint.save(
-                train_state.step, force=(train_state.step == job_config.training.steps)
-            )
+            if not checkpoint_disabled:
+                checkpoint.save(
+                    train_state.step, force=(train_state.step == job_config.training.steps)
+                )
 
             if torch.distributed.get_rank() == 0:
-                if job_config.checkpoint.enable_checkpoint:
+                if not checkpoint_disabled:
                     hf_target_path = None
                     dcp_save_path = os.path.join(job_config.job.dump_folder, job_config.checkpoint.folder, f"step-{train_state.step}") 
 

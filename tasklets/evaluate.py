@@ -47,6 +47,13 @@ SEQUENCE_EXACT_MATCH_TASKS = {
     "sorting",
 }
 
+GENERATED_SEQUENCE_TASKS = {
+    "full_copy",
+    "reverse_copy",
+    "selective_copy",
+    "sorting",
+}
+
 SPARSE_TOKEN_TASKS = {
     "memorization",
     "single_stack_ops",
@@ -195,6 +202,131 @@ def tokenize_aligned_batch(batch_rows: Sequence[Dict[str, str]], tokenizer, devi
     )
 
 
+def split_generation_prompt_and_target(row: Dict[str, str]) -> Tuple[str, str]:
+    x_tokens = str(row["x"]).split()
+    y_tokens = str(row["y"]).split()
+
+    try:
+        delimiter_idx = x_tokens.index("|")
+    except ValueError as exc:
+        raise ValueError(f"Generation-evaluated sample is missing '|' delimiter: {row['x']}") from exc
+
+    prompt_text = " ".join(x_tokens[: delimiter_idx + 1])
+    target_tokens = [token for token in y_tokens[delimiter_idx + 1 :] if token != "_"]
+    if not target_tokens:
+        raise ValueError(f"Generation-evaluated sample has no target tokens after '|': {row['y']}")
+    target_text = " ".join(target_tokens)
+    return prompt_text, target_text
+
+
+def tokenize_generation_batch(
+    batch_rows: Sequence[Dict[str, str]],
+    tokenizer,
+    device: torch.device,
+) -> Tuple[Batch, List[int]]:
+    prompt_texts: List[str] = []
+    target_texts: List[str] = []
+    for row in batch_rows:
+        prompt_text, target_text = split_generation_prompt_and_target(row)
+        prompt_texts.append(prompt_text)
+        target_texts.append(target_text)
+
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    try:
+        prompt_encoding = tokenizer(
+            prompt_texts,
+            add_special_tokens=False,
+            padding=True,
+            return_attention_mask=True,
+            return_tensors="pt",
+        )
+    finally:
+        tokenizer.padding_side = original_padding_side
+
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "right"
+    try:
+        target_encoding = tokenizer(
+            target_texts,
+            add_special_tokens=False,
+            padding=True,
+            return_attention_mask=True,
+            return_tensors="pt",
+        )
+    finally:
+        tokenizer.padding_side = original_padding_side
+
+    target_lengths = target_encoding["attention_mask"].sum(dim=1)
+    max_len = target_encoding["input_ids"].size(1)
+    label_mask = torch.zeros((len(batch_rows), max_len), dtype=torch.bool)
+    for row_idx, target_len in enumerate(target_lengths.tolist()):
+        label_mask[row_idx, :target_len] = True
+
+    return (
+        Batch(
+            input_ids=prompt_encoding["input_ids"].to(device),
+            attention_mask=prompt_encoding["attention_mask"].to(device),
+            label_mask=label_mask.to(device),
+            target_ids=target_encoding["input_ids"].to(device),
+            num_labeled_tokens=target_lengths.to(device),
+        ),
+        target_lengths.tolist(),
+    )
+
+
+@torch.inference_mode()
+def evaluate_generated_batch(
+    model,
+    tokenizer,
+    rows: Sequence[Dict[str, str]],
+    device: torch.device,
+) -> Tuple[int, int, int]:
+    batch, target_lengths = tokenize_generation_batch(rows, tokenizer=tokenizer, device=device)
+    max_new_tokens = max(target_lengths)
+
+    generated = model.generate(
+        input_ids=batch.input_ids,
+        attention_mask=batch.attention_mask,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    prompt_len = batch.input_ids.size(1)
+    generated_tokens = generated[:, prompt_len : prompt_len + max_new_tokens]
+    if generated_tokens.size(1) < max_new_tokens:
+        missing_tokens = max_new_tokens - generated_tokens.size(1)
+        generated_tokens = torch.nn.functional.pad(
+            generated_tokens,
+            (0, missing_tokens),
+            value=-1,
+        )
+
+    # debug targets and predictions on a sample in the batch
+    # print decoded tokens then ask for CLI input to continue
+    # sample_idx = 0
+    # sample_target_ids = batch.target_ids[sample_idx]
+    # sample_generated_ids = generated_tokens[sample_idx]
+    # sample_label_mask = batch.label_mask[sample_idx]
+    # sample_target_tokens = tokenizer.batch_decode(sample_target_ids[sample_label_mask])
+    # sample_generated_tokens = tokenizer.batch_decode(sample_generated_ids[sample_label_mask])
+    # if sample_target_tokens != sample_generated_tokens:
+    #     print(f"Sample {sample_idx} target tokens: {sample_target_tokens}")
+    #     print(f"Sample {sample_idx} generated tokens: {sample_generated_tokens}")
+    #     print(f"Exact match: {sample_target_tokens == sample_generated_tokens}")
+    #     input("Press Enter to continue...")
+
+    correct_mask = (generated_tokens == batch.target_ids) & batch.label_mask
+    correct_per_sample = correct_mask.sum(dim=1)
+    exact_per_sample = correct_per_sample == batch.num_labeled_tokens
+
+    return (
+        int(batch.num_labeled_tokens.sum().item()),
+        int(correct_mask.sum().item()),
+        int(exact_per_sample.sum().item()),
+    )
+
+
 @torch.inference_mode()
 def evaluate_dataset(
     model,
@@ -212,20 +344,47 @@ def evaluate_dataset(
     progress = tqdm(total=progress_total, desc=f"Evaluating {task}", unit="sample")
 
     for rows in batch_iter(dataset, batch_size=batch_size, max_samples=max_samples):
-        batch = tokenize_aligned_batch(rows, tokenizer=tokenizer, device=device)
+        if task in GENERATED_SEQUENCE_TASKS:
+            num_labeled_tokens, num_correct_tokens, num_exact_match = evaluate_generated_batch(
+                model=model,
+                tokenizer=tokenizer,
+                rows=rows,
+                device=device,
+            )
+        else:
+            batch = tokenize_aligned_batch(rows, tokenizer=tokenizer, device=device)
 
-        outputs = model(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
-        logits = outputs.logits[:, :-1, :]
-        predictions = logits.argmax(dim=-1)
+            outputs = model(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+            logits = outputs.logits[:, :-1, :]
+            predictions = logits.argmax(dim=-1)
 
-        correct_mask = (predictions == batch.target_ids) & batch.label_mask
-        correct_per_sample = correct_mask.sum(dim=1)
-        exact_per_sample = correct_per_sample == batch.num_labeled_tokens
+
+            correct_mask = (predictions == batch.target_ids) & batch.label_mask
+            correct_per_sample = correct_mask.sum(dim=1)
+            exact_per_sample = correct_per_sample == batch.num_labeled_tokens
+
+            # debug targets and predictions on a sample in the batch
+            # print decoded tokens then ask for CLI input to continue
+            # sample_idx = 0
+            # sample_target_ids = batch.target_ids[sample_idx]
+            # sample_prediction_ids = predictions[sample_idx]
+            # sample_label_mask = batch.label_mask[sample_idx]
+            # sample_target_tokens = tokenizer.batch_decode(sample_target_ids[sample_label_mask])
+            # sample_prediction_tokens = tokenizer.batch_decode(sample_prediction_ids[sample_label_mask])
+            # if sample_target_tokens != sample_prediction_tokens:
+            #     print(f"Sample {sample_idx} target tokens: {sample_target_tokens}")
+            #     print(f"Sample {sample_idx} prediction tokens: {sample_prediction_tokens}")
+            #     print(f"Exact match: {sample_target_tokens == sample_prediction_tokens}")
+            #     input("Press Enter to continue...")
+
+            num_labeled_tokens = int(batch.num_labeled_tokens.sum().item())
+            num_correct_tokens = int(correct_mask.sum().item())
+            num_exact_match = int(exact_per_sample.sum().item())
 
         metrics.num_samples += len(rows)
-        metrics.num_labeled_tokens += int(batch.num_labeled_tokens.sum().item())
-        metrics.num_correct_tokens += int(correct_mask.sum().item())
-        metrics.num_exact_match += int(exact_per_sample.sum().item())
+        metrics.num_labeled_tokens += num_labeled_tokens
+        metrics.num_correct_tokens += num_correct_tokens
+        metrics.num_exact_match += num_exact_match
 
         progress.update(len(rows))
 
@@ -332,7 +491,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-name", type=str, required=True,
                         help="Model name or local path loadable via AutoModelForCausalLM.")
     parser.add_argument("--task", type=str, required=True, choices=TASK_CHOICES,
-                        help="Task name matching the conventions in tasklets/data_generator.py.")
+                        help="Task name matching the conventions in tasklets/generate_data.py.")
     parser.add_argument("--dataset-name", type=str, required=True,
                         help="Dataset repo id or local dataset path. Local directories should contain split CSVs.")
     parser.add_argument("--split", type=str, default="test",

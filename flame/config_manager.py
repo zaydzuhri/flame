@@ -667,6 +667,11 @@ class JobConfig:
             help="Whether to enable checkpoint",
         )
         self.parser.add_argument(
+            "--checkpoint.disable_checkpoint",
+            action="store_true",
+            help="Disable checkpoint loading, saving, and dataloader snapshots.",
+        )
+        self.parser.add_argument(
             "--checkpoint.folder",
             type=str,
             default="checkpoint",

@@ -1,0 +1,29 @@
+{
+    "method": "random",
+    "metric": {
+        "goal": "minimize",
+        "name": "loss_metrics/global_avg_loss"
+    },
+    "parameters": {
+        "optimizer.lr": {
+            "max": 1e-2,
+            "min": 1e-6
+        },
+        "lr_scheduler.warmup_steps": {
+            "values": [
+                0,
+                500,
+                1000,
+                2000,
+                3000
+            ]
+        },
+        "training.steps": {
+            "values": [
+                5000,
+                8000,
+                10000
+            ]
+        }
+    }
+}
