@@ -16,16 +16,29 @@ def make_choices_int_seq(length: int, vocab: List[int]) -> List[int]:
     # return [random.choice(vocab) for _ in range(length)]
     return random.choices(vocab, k=length)
 
-def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
+def make_recall_seq(seq_len: int, vocab_size: int, unique_pairs: bool = False) -> List[int]:
     # make sure to have two different vocabularies for key and value
     key_vocab_size = vocab_size // 2
-    keys = make_int_seq(seq_len, list(range(1, key_vocab_size + 1)))
-    values = make_int_seq(seq_len, list(range(key_vocab_size + 1, vocab_size + 1)))
-    # interleave keys and values
     s: List[int] = []
-    for k, v in zip(keys, values):
-        s.append(k)
-        s.append(v)
+    if unique_pairs:
+        keys = make_int_seq(seq_len, list(range(1, key_vocab_size + 1)))
+        values = make_int_seq(seq_len, list(range(key_vocab_size + 1, vocab_size + 1)))
+        # interleave keys and values
+        for k, v in zip(keys, values):
+            s.append(k)
+            s.append(v)
+    else:
+        key_vocab = list(range(1, key_vocab_size + 1))
+        val_vocab = list(range(key_vocab_size + 1, vocab_size + 1))
+        kv_map = {}
+        s = []
+        for _ in range(seq_len // 2):
+            k = random.choice(key_vocab)
+            if k not in kv_map:
+                kv_map[k] = random.choice(val_vocab)
+            v = kv_map[k]
+            s.append(k)
+            s.append(v)
     return s
 
 # def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
@@ -39,30 +52,67 @@ def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
 #         s.append(v)
 #     return s
 
-def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int) -> List[int]:
-    # make sure to have two different vocabularies for key and value
-    key_vocab_size = vocab_size // 2 
-    val_vocab_size = vocab_size - key_vocab_size
-    key_nums = list(range(1, key_vocab_size + 1))
-    val_nums = list(range(key_vocab_size + 1, vocab_size + 1))
-    # create random blobs of maximum length within both key and value vocab, then interleave them
-    key_blobs = []
-    for _ in range(key_vocab_size):
-        blob_len = random.randint(1, window_size)
-        blob = random.sample(key_nums, min(blob_len, len(key_nums)))
-        key_blobs.append(blob)
-    val_blobs = []
-    for _ in range(val_vocab_size):
-        blob_len = random.randint(1, window_size)
-        blob = random.sample(val_nums, min(blob_len, len(val_nums)))
-        val_blobs.append(blob)
-    keys = make_int_seq(seq_len, key_blobs)
-    values = make_int_seq(seq_len, val_blobs)
+# def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int, unique_pairs: bool = False) -> List[int]:
+#     # make sure to have two different vocabularies for key and value
+#     key_vocab_size = vocab_size // 2 
+#     val_vocab_size = vocab_size - key_vocab_size
+#     key_nums = list(range(1, key_vocab_size + 1))
+#     val_nums = list(range(key_vocab_size + 1, vocab_size + 1))
+#     # create random blobs of maximum length within both key and value vocab, then interleave them
+#     key_blobs = []
+#     for _ in range(key_vocab_size):
+#         blob_len = random.randint(1, window_size)
+#         blob = random.sample(key_nums, min(blob_len, len(key_nums)))
+#         key_blobs.append(blob)
+#     val_blobs = []
+#     for _ in range(val_vocab_size):
+#         blob_len = random.randint(1, window_size)
+#         blob = random.sample(val_nums, min(blob_len, len(val_nums)))
+#         val_blobs.append(blob)
+#     # interleave keys and values
+#     s: List[int] = []
+#     if unique_pairs:
+#         keys = make_int_seq(seq_len, key_blobs)
+#         values = make_int_seq(seq_len, val_blobs)
+#         for k, v in zip(keys, values):
+#             s.append(k)
+#             s.append(v)
+#     else:
+#         kv_map = {}
+#         for _ in range(seq_len // 2):
+#             k = random.choice(key_blobs)
+#             k_tuple = tuple(k)
+#             if k_tuple not in kv_map:
+#                 v = random.choice(val_blobs)
+#                 kv_map[k_tuple] = v
+#             else:
+#                 v = kv_map[k_tuple]
+#             s.append(k)
+#             s.append(v)
+#     return s
+
+# make key_blobs and val_blobs global so we can reuse them across samples for the fuzzy recall task, otherwise we can't guarantee the same key blob will have the same value blob across samples which breaks the task
+def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]], unique_pairs: bool = False) -> List[int]:
     # interleave keys and values
     s: List[int] = []
-    for k, v in zip(keys, values):
-        s.append(k)
-        s.append(v)
+    if unique_pairs:
+        keys = make_int_seq(seq_len, key_blobs)
+        values = make_int_seq(seq_len, val_blobs)
+        for k, v in zip(keys, values):
+            s.append(k)
+            s.append(v)
+    else:
+        kv_map = {}
+        for _ in range(seq_len // 2):
+            k = random.choice(key_blobs)
+            k_tuple = tuple(k)
+            if k_tuple not in kv_map:
+                v = random.choice(val_blobs)
+                kv_map[k_tuple] = v
+            else:
+                v = kv_map[k_tuple]
+            s.append(k)
+            s.append(v)
     return s
 
 def to_str(tokens) -> List[str]:
@@ -161,8 +211,8 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     # y: _ _ _ _ _ _ _ _ 4 _ 2
     # make sure to have two different vocabularies for key and value
     s = make_recall_seq(seq_len, vocab_size)
-    # sample distinct positions, avoid last index for successor
-    positions = sorted(random.sample(range(seq_len - 1), num_queries))
+    # sample distinct positions at an even index, avoid last index for successor
+    positions = sorted(random.sample(range(0, seq_len - 1, 2), num_queries))
     queries = [s[p] for p in positions]
     x = to_str(s) + ["|"]
     # queries separated by 'm'
@@ -184,13 +234,35 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     y[-len(answers):] = answers
     return {"x": x, "y": y}
 
-def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
+# def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
+#     # output:
+#     # x: 1 2 3 4 5 6 | 2 3 4 5
+#     # y: _ _ _ _ _ _ _ _ _ _ 5
+#     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size) # this will be a list of lists (blobs)
+#     # do something similar like the previous recall sample function but then flatten at the end
+#     pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
+#     q = s[pos]
+#     v = s[pos + 1]
+#     s_flat = []
+#     for blob in s:
+#         s_flat.extend(blob)
+#     x = s_flat + ["|"] + q + v
+#     y = ["_"] * (len(s_flat) + 1 + len(q)) + v
+#     # then we have to make them all the same length
+#     # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
+#     max_len = window_size * len(s) + 1 + 2 * window_size
+#     x = x + ["_"] * (max_len - len(x))
+#     y = y + ["_"] * (max_len - len(y))
+#     return {"x": x, "y": y}
+
+# make the key blobs and value blobs global
+def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
     # output:
     # x: 1 2 3 4 5 6 | 2 3 4 5
     # y: _ _ _ _ _ _ _ _ _ _ 5
-    s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size) # this will be a list of lists (blobs)
+    s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size, key_blobs, val_blobs) # this will be a list of lists (blobs)
     # do something similar like the previous recall sample function but then flatten at the end
-    pos = random.choice(range(len(s) - 1)) # choose a random position in the flattened sequence, but we can only guarantee the successor if it's not in the last blob
+    pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
     q = s[pos]
     v = s[pos + 1]
     s_flat = []
@@ -224,8 +296,8 @@ def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noi
         noise_token = random.randint(noise_vocab_start, vocab_size)
         insert_pos = random.randint(0, len(s))
         noise_prefix.insert(insert_pos, noise_token)
-    # choose query positions on the original sequence to define the labels
-    positions = sorted(random.sample(range(len(s) - 1), num_queries))
+    # choose query positions on even indices on the original sequence to define the labels
+    positions = sorted(random.sample(range(0, len(s) - 1, 2), num_queries))
     queries = [s[p] for p in positions]
     x = to_str(noise_prefix) + ["|"]
     for i, q in enumerate(queries):
@@ -663,8 +735,26 @@ def main():
         train_sample_fn = lambda: gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
         test_sample_fn = lambda: gen_multi_query_recall_sample(args.seq_len, args.vocab_size, args.num_queries)
     elif args.task == "fuzzy_recall":
-        train_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
-        test_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size)
+        # create random blobs of maximum length within both key and value vocab, then interleave them
+        # make sure to have two different vocabularies for key and value
+        key_vocab_size = args.vocab_size // 2 
+        val_vocab_size = args.vocab_size - key_vocab_size
+        # key_nums = list(range(1, key_vocab_size + 1))
+        # val_nums = list(range(key_vocab_size + 1, args.vocab_size + 1))
+        key_nums = list(range(1, args.vocab_size + 1))
+        val_nums = list(range(1, args.vocab_size + 1))
+        key_blobs = []
+        for _ in range(key_vocab_size):
+            blob_len = random.randint(1, args.window_size)
+            blob = random.sample(key_nums, min(blob_len, len(key_nums)))
+            key_blobs.append(blob)
+        val_blobs = []
+        for _ in range(val_vocab_size):
+            blob_len = random.randint(1, args.window_size)
+            blob = random.sample(val_nums, min(blob_len, len(val_nums)))
+            val_blobs.append(blob)
+        train_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, key_blobs, val_blobs)
+        test_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, key_blobs, val_blobs)
     elif args.task == "noisy_recall":
         train_sample_fn = lambda: gen_noisy_recall_sample(
             args.seq_len, args.vocab_size, args.num_queries, args.noise_prob

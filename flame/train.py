@@ -395,9 +395,6 @@ def main(job_config: JobConfig):
 
     # load initial checkpoint
     checkpoint = None
-    print('CHECKPOINT ENABLED?', job_config.checkpoint.enable_checkpoint)
-    print('CHECKPOINT DISABLED?', checkpoint_disabled)
-    print('CHECKPOINT VARIABLE:', checkpoint)
     if not checkpoint_disabled:
         checkpoint = CheckpointManager(
             dataloader=dataloader,
