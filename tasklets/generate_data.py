@@ -21,8 +21,8 @@ def make_recall_seq(seq_len: int, vocab_size: int, unique_pairs: bool = False) -
     key_vocab_size = vocab_size // 2
     s: List[int] = []
     if unique_pairs:
-        keys = make_int_seq(seq_len, list(range(1, key_vocab_size + 1)))
-        values = make_int_seq(seq_len, list(range(key_vocab_size + 1, vocab_size + 1)))
+        keys = make_int_seq(seq_len // 2, list(range(1, key_vocab_size + 1)))
+        values = make_int_seq(seq_len // 2, list(range(key_vocab_size + 1, vocab_size + 1)))
         # interleave keys and values
         for k, v in zip(keys, values):
             s.append(k)
@@ -96,8 +96,8 @@ def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int, key_b
     # interleave keys and values
     s: List[int] = []
     if unique_pairs:
-        keys = make_int_seq(seq_len, key_blobs)
-        values = make_int_seq(seq_len, val_blobs)
+        keys = make_int_seq(seq_len // 2, key_blobs)
+        values = make_int_seq(seq_len // 2, val_blobs)
         for k, v in zip(keys, values):
             s.append(k)
             s.append(v)
@@ -204,6 +204,34 @@ def gen_single_query_recall_sample(seq_len: int, vocab_size: int) -> Dict:
     y = ["_"] * (len(s) + 2) + [str(v)]
     return {"x": x, "y": y}
 
+# def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: int) -> Dict:
+#     # output:
+#     # x: 1 2 3 4 5 6 | 3 4 1 2
+#     # y: _ _ _ _ _ _ _ _ 4 _ 2
+#     # make sure to have two different vocabularies for key and value
+#     s = make_recall_seq(seq_len, vocab_size)
+#     # sample distinct positions at an even index, avoid last index for successor
+#     positions = sorted(random.sample(range(0, seq_len - 1, 2), num_queries))
+#     queries = [s[p] for p in positions]
+#     x = to_str(s) + ["|"]
+#     # queries separated by 'm'
+#     for i, q in enumerate(queries):
+#         x.append(str(q))
+#         x.append("?")
+#     # total outputs = prefix length + delimiter '|' + 2 tokens per query
+#     pad_len = len(s) + 1 + 2 * len(queries)
+#     y = ["_"] * pad_len
+
+#     # fill answer slots at end
+#     answers = []
+#     for pos in positions:
+#         answers.append(str(s[pos + 1]))  # successor
+#         answers.append("_")
+
+#     # remove last underscore
+#     answers = answers[:-1]
+#     y[-len(answers):] = answers
+#     return {"x": x, "y": y}
 
 def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: int) -> Dict:
     # output:
@@ -214,24 +242,15 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
     # sample distinct positions at an even index, avoid last index for successor
     positions = sorted(random.sample(range(0, seq_len - 1, 2), num_queries))
     queries = [s[p] for p in positions]
+    values = [s[p + 1] for p in positions]
     x = to_str(s) + ["|"]
+    y = ["_"] * (len(s) + 1)
     # queries separated by 'm'
-    for i, q in enumerate(queries):
-        x.append(str(q))
-        x.append("?")
-    # total outputs = prefix length + delimiter '|' + 2 tokens per query
-    pad_len = len(s) + 1 + 2 * len(queries)
-    y = ["_"] * pad_len
+    for q, v in zip(queries, values):
+        # x.extend([str(q), str(v)])
+        x.extend([str(q), str(v)])
+        y.extend(["_", str(v)])
 
-    # fill answer slots at end
-    answers = []
-    for pos in positions:
-        answers.append(str(s[pos + 1]))  # successor
-        answers.append("_")
-
-    # remove last underscore
-    answers = answers[:-1]
-    y[-len(answers):] = answers
     return {"x": x, "y": y}
 
 # def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
@@ -255,24 +274,51 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
 #     y = y + ["_"] * (max_len - len(y))
 #     return {"x": x, "y": y}
 
-# make the key blobs and value blobs global
-def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
+# # make the key blobs and value blobs global
+# def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
+#     # output:
+#     # x: 1 2 3 4 5 6 | 2 3 4 5
+#     # y: _ _ _ _ _ _ _ _ _ _ 5
+#     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size, key_blobs, val_blobs) # this will be a list of lists (blobs)
+#     # do something similar like the previous recall sample function but then flatten at the end
+#     pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
+#     q = s[pos]
+#     v = s[pos + 1]
+#     s_flat = []
+#     for blob in s:
+#         s_flat.extend(blob)
+#     x = s_flat + ["|"] + q + v
+#     y = ["_"] * (len(s_flat) + 1 + len(q)) + v
+#     # then we have to make them all the same length
+#     # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
+#     max_len = window_size * len(s) + 1 + 2 * window_size
+#     x = x + ["_"] * (max_len - len(x))
+#     y = y + ["_"] * (max_len - len(y))
+#     return {"x": x, "y": y}
+
+# make it so that you can have multiple queries for the fuzzy recall sample
+def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, num_queries: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
     # output:
-    # x: 1 2 3 4 5 6 | 2 3 4 5
-    # y: _ _ _ _ _ _ _ _ _ _ 5
+    # x: 1 2 3 4 5 6 | 4 5 6 1 2 3
+    # y: 1 2 3 4 5 6 | _ _ 6 _ _ 3
     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size, key_blobs, val_blobs) # this will be a list of lists (blobs)
-    # do something similar like the previous recall sample function but then flatten at the end
-    pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
-    q = s[pos]
-    v = s[pos + 1]
+    # sample distinct positions at an even index, avoid last index for successor
+    positions = sorted(random.sample(range(0, len(s) - 1, 2), num_queries))
+    queries = [s[p] for p in positions]
+    values = [s[p + 1] for p in positions]
     s_flat = []
     for blob in s:
         s_flat.extend(blob)
-    x = s_flat + ["|"] + q + v
-    y = ["_"] * (len(s_flat) + 1 + len(q)) + v
+    x = s_flat + ["|"]
+    y = ["_"] * (len(s_flat) + 1)
+    for q, v in zip(queries, values):
+        x.extend(q)
+        x.extend(v)
+        y.extend(["_"] * len(q))
+        y.extend(v)
     # then we have to make them all the same length
-    # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
-    max_len = window_size * len(s) + 1 + 2 * window_size
+    # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + num_queries * 2 * the maximum blob size for the query and value
+    max_len = window_size * len(s) + 1 + num_queries * 2 * window_size
     x = x + ["_"] * (max_len - len(x))
     y = y + ["_"] * (max_len - len(y))
     return {"x": x, "y": y}
@@ -753,8 +799,8 @@ def main():
             blob_len = random.randint(1, args.window_size)
             blob = random.sample(val_nums, min(blob_len, len(val_nums)))
             val_blobs.append(blob)
-        train_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, key_blobs, val_blobs)
-        test_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, key_blobs, val_blobs)
+        train_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, args.num_queries, key_blobs, val_blobs)
+        test_sample_fn = lambda: gen_fuzzy_recall_sample(args.seq_len, args.vocab_size, args.window_size, args.num_queries, key_blobs, val_blobs)
     elif args.task == "noisy_recall":
         train_sample_fn = lambda: gen_noisy_recall_sample(
             args.seq_len, args.vocab_size, args.num_queries, args.noise_prob
