@@ -405,25 +405,18 @@ def make_memorization_table(
     key_len: int,
     vocab_size: int,
 ) -> Dict[Tuple[int, ...], int]:
+    # check if we can even create num_keys unique keys of length key_len with the given vocab_size
+    if num_keys > vocab_size ** key_len:
+        raise ValueError(f"Cannot create {num_keys} unique keys of length {key_len} with vocab size {vocab_size}")
     # create a list of num_keys unique keys, each key is a list of tokens of length key_len
-    # to make sure the keys are unique, we can just incrementally generate them from the vocab
-    vocab = list(range(1, vocab_size + 1))
-    # doing it cheaply by keeping track of indices in the vocab for each position in the key
-    key_indices = [0] * key_len
+    # to make sure the keys are unique while randomly generating them, we keep track with a set and keep generating until we have enough unique keys
+    keys_set = set()
     keys = []
-    for _ in range(num_keys):
-        key = [vocab[i] for i in key_indices]
-        keys.append(key)
-        # increment the key indices, last one first like counting
-        if key_indices[-1] < vocab_size - 1:
-            key_indices[-1] += 1
-        else:            # need to carry over
-            for j in range(key_len - 1, -1, -1):
-                if key_indices[j] < vocab_size - 1:
-                    key_indices[j] += 1
-                    break
-                else:
-                    key_indices[j] = 0
+    while len(keys) < num_keys:
+        key = tuple(random.randint(1, vocab_size) for _ in range(key_len))
+        if key not in keys_set:
+            keys_set.add(key)
+            keys.append(key)
     # assign random values to each key, doesn't matter if they overlap
     table = {}    
     for key in keys:
@@ -456,20 +449,52 @@ def make_memorization_sample_fns(
 
 # === Counting (count occurrences of a query token) ===
 
-def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int) -> Dict:
+# def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int) -> Dict:
+#     # output:
+#     # x: 3 4 4 1 3 4 | 4 3
+#     # y: _ _ _ _ _ _ _ _ 3
+#     count = random.randint(1, min(seq_len - 1, vocab_size - 1, max_count))
+#     query_token = random.randint(1, vocab_size)
+#     # make sure the query token appears count times in the sequence
+#     vocab_other = [i for i in range(1, vocab_size + 1) if i != query_token]
+#     seq = make_choices_int_seq(seq_len - count, vocab_other)
+#     for _ in range(count):
+#         insert_pos = random.randint(0, len(seq))
+#         seq.insert(insert_pos, query_token)
+#     x = to_str(seq) + ["|", str(query_token), str(count)]
+#     y = ["_"] * (len(seq) + 2) + [str(count)]
+#     return {"x": x, "y": y}
+
+# make it so that we count several numbers as targets instead of just one (so that we get more supervision per sample)
+def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int, num_queries: int) -> Dict:
     # output:
-    # x: 3 4 4 1 3 4 | 4 3
-    # y: _ _ _ _ _ _ _ _ 3
-    count = random.randint(1, min(seq_len - 1, vocab_size - 1, max_count))
-    query_token = random.randint(1, vocab_size)
-    # make sure the query token appears count times in the sequence
-    vocab_other = [i for i in range(1, vocab_size + 1) if i != query_token]
-    seq = make_choices_int_seq(seq_len - count, vocab_other)
-    for _ in range(count):
-        insert_pos = random.randint(0, len(seq))
-        seq.insert(insert_pos, query_token)
-    x = to_str(seq) + ["|", str(query_token), str(count)]
-    y = ["_"] * (len(seq) + 2) + [str(count)]
+    # x: 3 4 4 1 3 4 | 4 3 3 2 (4 appears 3 times, 3 appears 2 times)
+    # y: _ _ _ _ _ _ _ _ 3 _ 2
+    query_tokens = random.sample(range(1, vocab_size + 1), num_queries)
+    counts = {}
+    count_quota = seq_len - num_queries  # we need to leave at least one slot for each query token, so we subtract num_queries from the total length to get the quota for the counts
+    for query_token in query_tokens:
+        count = random.randint(1, min(seq_len - 1, vocab_size - 1, max_count, count_quota - (num_queries - len(counts) - 1))) # ensure we have enough quota left for the remaining query tokens
+        count_quota -= count
+        counts[query_token] = count
+    
+    # make other tokens for the sequence
+    vocab_other = [i for i in range(1, vocab_size + 1) if i not in query_tokens]
+    seq = make_choices_int_seq(count_quota, vocab_other)
+    # insert the query tokens according to their counts
+    for query_token, count in counts.items():
+        for _ in range(count):
+            insert_pos = random.randint(0, len(seq))
+            seq.insert(insert_pos, query_token)
+    x = to_str(seq) + ["|"]
+    for query_token in query_tokens:
+        x.append(str(query_token))
+        x.append(str(counts[query_token]))
+    y = ["_"] * (len(seq) + 1)
+    for query_token in query_tokens:
+        y.append("_")
+        y.append(str(counts[query_token]))
+
     return {"x": x, "y": y}
 
 # === Sorting (sort tokens by count) ===
@@ -741,7 +766,7 @@ def build_arg_parser():
     parser.add_argument("--seed", type=int, default=13)
 
     # task-specific knobs
-    parser.add_argument("--num-queries", type=int, default=2,
+    parser.add_argument("--num-queries", type=int, default=4,
                         help="Number of queries for multi/noisy recall.")
     parser.add_argument("--window-size", type=int, default=3,
                         help="Window size for fuzzy recall.")
@@ -822,8 +847,8 @@ def main():
         train_sample_fn = lambda: make_memorization_sample_fns(args.seq_len, args.key_len, table)
         test_sample_fn = lambda: make_memorization_sample_fns(args.seq_len, args.key_len, table)
     elif args.task == "counting":
-        train_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count)
-        test_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count)
+        train_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count, args.num_queries)
+        test_sample_fn = lambda: gen_counting_sample(args.seq_len, args.vocab_size, args.max_count, args.num_queries)
     elif args.task == "sorting":
         train_sample_fn = lambda: gen_sorting_sample(args.seq_len, args.vocab_size, args.num_unique_toks)
         test_sample_fn = lambda: gen_sorting_sample(args.seq_len, args.vocab_size, args.num_unique_toks)

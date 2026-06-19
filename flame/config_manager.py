@@ -496,6 +496,23 @@ class JobConfig:
             help="Whether to compile the model",
         )
         self.parser.add_argument(
+            "--training.enable_early_stopping",
+            action="store_true",
+            help="Whether to enable early stopping based on validation loss threshold",
+        )
+        self.parser.add_argument(
+            "--training.early_stopping_patience",
+            type=int,
+            default=3,
+            help="Number of consecutive validation checks with loss <= --training.early_stopping_threshold before stopping training",
+        )
+        self.parser.add_argument(
+            "--training.early_stopping_threshold",
+            type=float,
+            default=0.0,
+            help="Absolute validation loss threshold for early stopping",
+        )
+        self.parser.add_argument(
             "--training.gc_freq",
             type=int,
             default=50,

@@ -36,6 +36,7 @@ from datetime import datetime
 
 import custom_models
 from flame.components.checkpoint import TrainState
+from flame.components.early_stopping import EarlyStoppingManager
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader as flame_build_dataloader
 from flame.models.parallelize_fla import parallelize_fla
@@ -216,6 +217,12 @@ def main(job_config: JobConfig):
         job_config.training.validation_interval > 0
         and job_config.training.validation_steps > 0
     )
+    if job_config.training.enable_early_stopping and not validation_enabled:
+        logger.warning(
+            "Early stopping is enabled, but validation is disabled. "
+            "Set --training.validation_interval > 0 and --training.validation_steps > 0 "
+            "to activate early stopping checks."
+        )
     if validation_enabled:
         validation_dataset = build_dataset_fn(
             dataset=(
@@ -531,6 +538,19 @@ def main(job_config: JobConfig):
         f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}"
     )
 
+    # Initialize early stopping manager if enabled
+    early_stopping = EarlyStoppingManager(
+        patience=job_config.training.early_stopping_patience,
+        threshold=job_config.training.early_stopping_threshold,
+        enabled=job_config.training.enable_early_stopping,
+    )
+    if early_stopping.enabled:
+        logger.info(
+            f"{color.cyan}Early stopping enabled: "
+            f"validation_loss_threshold={early_stopping.threshold}, "
+            f"required_consecutive_checks={early_stopping.patience}{color.reset}"
+        )
+
     with (
         maybe_enable_profiling(
             job_config, global_step=train_state.step
@@ -667,6 +687,7 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
+            early_stop_triggered = False
             validation_extra_metrics = {}
             should_run_validation = validation_dataloader is not None and (
                 train_state.step % job_config.training.validation_interval == 0
@@ -715,6 +736,13 @@ def main(job_config: JobConfig):
                         f"{color.cyan}validation: loss={_to_float(validation_avg_loss):.6f} "
                         f"max_loss={_to_float(validation_max_loss):.6f}{color.reset}"
                     )
+                    
+                    # Check early stopping condition
+                    if early_stopping.check(_to_float(validation_avg_loss)):
+                        logger.warning(
+                            f"{color.red}Early stopping triggered at step {train_state.step}{color.reset}"
+                        )
+                        early_stop_triggered = True
 
             # log metrics - Use MetricsProcessor
             if metric_logger.should_log(train_state.step):
@@ -771,7 +799,11 @@ def main(job_config: JobConfig):
 
             if not checkpoint_disabled:
                 checkpoint.save(
-                    train_state.step, force=(train_state.step == job_config.training.steps)
+                    train_state.step,
+                    force=(
+                        train_state.step == job_config.training.steps
+                        or early_stop_triggered
+                    ),
                 )
 
             if torch.distributed.get_rank() == 0:
@@ -822,6 +854,9 @@ def main(job_config: JobConfig):
                                 )                               
                             except Exception as e:
                                 logger.error(f"Failed during HF Hub upload for step {train_state.step}: {e}", exc_info=True)
+
+            if early_stop_triggered:
+                break
 
             # signal the profiler that the next profiling step has started
             if torch_profiler:
