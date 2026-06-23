@@ -114,7 +114,7 @@ echo "Converting the DCP checkpoints to HF format..."
 
 python -m flame.utils.convert_dcp_to_hf \
   --path $path \
-  --step $steps \
+  --step -1 \
   --config $config \
   --tokenizer $tokenizer
 

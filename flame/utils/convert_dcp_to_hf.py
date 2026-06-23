@@ -37,7 +37,16 @@ def save_pretrained(
     with tempfile.TemporaryDirectory() as tmpdir:
         # base_checkpoint_dir = os.path.dirname(path)
         base_checkpoint_dir = path
-        checkpoint = os.path.join(base_checkpoint_dir, f'checkpoint/step-{step}')
+        # if step is -1, check the folder for the latest checkpoint
+        if step == -1:
+            checkpoints = [d for d in os.listdir(base_checkpoint_dir + '/checkpoint') if d.startswith('step-')]
+            if not checkpoints:
+                raise ValueError(f"No checkpoints found in {base_checkpoint_dir}")
+            checkpoints = sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))
+            checkpoint = os.path.join(base_checkpoint_dir, 'checkpoint', checkpoints[-1])
+            logger.info(f"Found checkpoint {checkpoint} for step {step}")
+        else:
+            checkpoint = os.path.join(base_checkpoint_dir, f'checkpoint/step-{step}')
         checkpoint_path = os.path.join(tmpdir, 'checkpoint.pt')
         logger.info(f"Saving the distributed checkpoint to {checkpoint_path}")
         dcp_to_torch_save(checkpoint, checkpoint_path)
