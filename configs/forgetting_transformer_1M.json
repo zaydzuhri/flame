@@ -1,7 +1,7 @@
 {
     "model_type": "forgetting_transformer",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "num_heads": 2,
     "num_kv_heads": null,
     "qkv_bias": false,
@@ -21,5 +21,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

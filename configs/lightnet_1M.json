@@ -1,17 +1,17 @@
 {
     "model_type": "lightnet",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "attn_mode": "chunk",
     "num_heads": 2,
-    "expand_ratio": 16,
+    "expand_ratio": 8,
     "use_short_conv": false,
     "conv_size": 4,
     "hidden_ratio": 4,
     "intermediate_size": null,
     "hidden_act": "swish",
     "max_position_embeddings": 2048,
-    "gate_low_rank_dim": 16,
+    "gate_low_rank_dim": 8,
     "elementwise_affine": true,
     "norm_eps": 1e-6,
     "attn": null,
@@ -26,5 +26,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

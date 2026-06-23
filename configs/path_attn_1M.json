@@ -1,7 +1,7 @@
 {
     "model_type": "path_attn",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "num_heads": 2,
     "num_kv_heads": null,
     "hidden_ratio": 4,
@@ -20,7 +20,7 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134,
+    "vocab_size": 292,
     "use_forget_gate": false,
     "use_w_shortconv": true,
     "use_low_rank_w": true

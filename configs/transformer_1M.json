@@ -5,7 +5,7 @@
     "fuse_cross_entropy": true,
     "fuse_norm": true,
     "hidden_act": "swish",
-    "hidden_size": 128,
+    "hidden_size": 64,
     "initializer_range": 0.02,
     "max_position_embeddings": 1024,
     "model_type": "transformer",
@@ -14,5 +14,5 @@
     "norm_eps": 1e-06,
     "tie_word_embeddings": false,
     "use_cache": true,
-    "vocab_size": 8228
+    "vocab_size": 292
 }

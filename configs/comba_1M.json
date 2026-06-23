@@ -1,9 +1,9 @@
 {
     "model_type": "comba",
     "attn_mode": "chunk",
-    "hidden_size": 128,
+    "hidden_size": 64,
     "conv_size": 4,
-    "head_dim": 64,
+    "head_dim": 32,
     "num_heads": 2,
     "num_v_heads": null,
     "expand_v": 2.0,
@@ -16,8 +16,8 @@
     "hidden_ratio": 4,
     "intermediate_size": null,
     "hidden_act": "swish",
-    "num_hidden_layers": 4,
-    "norm_eps": 0.000001,
+    "num_hidden_layers": 2,
+    "norm_eps": 1e-6,
     "attn": null,
     "use_cache": true,
     "tie_word_embeddings": false,
@@ -27,5 +27,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

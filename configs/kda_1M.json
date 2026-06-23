@@ -1,21 +1,21 @@
 {
     "model_type": "kda",
     "attn_mode": "chunk",
-    "hidden_size": 128,
+    "hidden_size": 64,
     "expand_v": 1.0,
     "use_short_conv": true,
     "allow_neg_eigval": false,
     "safe_gate": false,
     "lower_bound": null,
     "conv_size": 4,
-    "head_dim": 64,
+    "head_dim": 32,
     "num_heads": 2,
     "num_v_heads": null,
     "max_position_embeddings": 2048,
     "hidden_ratio": 4,
     "intermediate_size": null,
     "hidden_act": "swish",
-    "num_hidden_layers": 4,
+    "num_hidden_layers": 2,
     "norm_eps": 1e-6,
     "attn": null,
     "use_cache": true,
@@ -28,5 +28,5 @@
     "fuse_swiglu": true,
     "fuse_cross_entropy": true,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

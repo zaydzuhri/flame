@@ -8,15 +8,16 @@
     "head_dim": 64,
     "hidden_act": "swish",
     "hidden_ratio": 4,
-    "hidden_size": 128,
+    "hidden_size": 64,
     "initializer_range": 0.02,
     "intermediate_size": null,
     "model_type": "gated_deltanet",
     "norm_eps": 1e-06,
     "num_heads": 2,
-    "num_hidden_layers": 4,
+    "num_hidden_layers": 2,
     "tie_word_embeddings": false,
     "use_cache": true,
     "use_gate": true,
-    "use_short_conv": true
+    "use_short_conv": true,
+    "vocab_size": 292
 }

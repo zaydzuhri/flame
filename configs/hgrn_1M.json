@@ -1,8 +1,8 @@
 {
     "model_type": "hgrn",
     "attn_mode": "fused_recurrent",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "expand_ratio": 1,
     "use_short_conv": false,
     "conv_size": 4,
@@ -22,5 +22,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

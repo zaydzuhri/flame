@@ -6,11 +6,11 @@
   "fuse_cross_entropy": true,
   "fuse_norm": true,
   "hidden_act": "silu",
-  "hidden_size": 128,
+  "hidden_size": 64,
   "initializer_range": 0.02,
   "model_type": "mamba",
   "norm_eps": 1e-05,
-  "num_hidden_layers": 4,
+  "num_hidden_layers": 2,
   "pad_token_id": 0,
   "rescale_prenorm_residual": false,
   "residual_in_fp32": false,
@@ -26,5 +26,5 @@
   "use_bias": false,
   "use_cache": true,
   "use_conv_bias": true,
-  "vocab_size": 134
+  "vocab_size": 292
 }

@@ -1,18 +1,18 @@
 {
     "model_type": "abc",
-    "hidden_size": 128,
+    "hidden_size": 64,
     "gate_low_rank_dim": 8,
     "clamp_min": -32,
     "clamp_max": 32,
     "hidden_ratio": 4,
     "intermediate_size": null,
-    "num_hidden_layers": 4,
+    "num_hidden_layers": 2,
     "num_heads": 2,
     "num_slots": 16,
     "use_short_conv": false,
     "conv_size": 4,
-    "exapnd_k": 0.5,
-    "exapnd_v": 1,
+    "expand_k": 0.5,
+    "expand_v": 1,
     "hidden_act": "swish",
     "max_position_embeddings": 2048,
     "elementwise_affine": true,
@@ -30,5 +30,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

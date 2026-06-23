@@ -11,12 +11,12 @@
     "gate_logit_normalizer": 4,
     "hidden_act": "swish",
     "hidden_ratio": 4,
-    "hidden_size": 128,
+    "hidden_size": 64,
     "initializer_range": 0.02,
     "intermediate_size": null,
     "model_type": "gsa",
     "num_heads": 2,
-    "num_hidden_layers": 4,
+    "num_hidden_layers": 2,
     "num_slots": 16,
     "norm_eps": 1e-06,
     "share_conv_kernel": true,
@@ -25,5 +25,6 @@
     "use_norm": true,
     "use_output_gate": true,
     "use_rope": false,
-    "use_short_conv": false
+    "use_short_conv": false,
+    "vocab_size": 292
 }

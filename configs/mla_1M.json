@@ -1,14 +1,14 @@
 {
     "model_type": "mla",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "num_heads": 2,
-    "q_lora_rank": 16,
-    "qk_rope_head_dim": 16,
-    "kv_lora_rank": 32,
-    "v_head_dim": 16,
-    "qk_nope_head_dim": 16,
-    "qk_head_dim": 32,
+    "q_lora_rank": 8,
+    "qk_rope_head_dim": 8,
+    "kv_lora_rank": 16,
+    "v_head_dim": 8,
+    "qk_nope_head_dim": 8,
+    "qk_head_dim": 16,
     "window_size": null,
     "rope_theta": 10000.0,
     "max_position_embeddings": 2048,
@@ -29,5 +29,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }

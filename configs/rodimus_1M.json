@@ -1,8 +1,8 @@
 {
     "model_type": "rodimus",
     "block_type": "rodimus_plus",
-    "hidden_size": 128,
-    "num_hidden_layers": 4,
+    "hidden_size": 64,
+    "num_hidden_layers": 2,
     "attn_mode": "chunk",
     "residual_in_fp32": false,
     "block_residual_in_fp32": false,
@@ -10,7 +10,7 @@
     "input_gate_low_rank": "auto",
     "use_short_conv": true,
     "conv_size": 4,
-    "hidden_ratio": 1.25,
+    "hidden_ratio": 4,
     "intermediate_size": null,
     "hidden_act": "swish",
     "max_position_embeddings": 2048,
@@ -19,12 +19,9 @@
     "attn": null,
     "ska_attn": {
         "num_heads": 2,
-        "head_dim": 64
+        "head_dim": 32
     },
     "use_cache": true,
-    "pad_token_id": null,
-    "bos_token_id": 126080,
-    "eos_token_id": 126081,
     "tie_word_embeddings": true,
     "initializer_range": 0.02,
     "fuse_norm": true,
@@ -32,5 +29,5 @@
     "fuse_cross_entropy": true,
     "fuse_linear_cross_entropy": false,
     "use_l2warp": false,
-    "vocab_size": 134
+    "vocab_size": 292
 }
