@@ -384,14 +384,6 @@ if [[ -z "$task" ]]; then
 fi
 
 dataset_path="$EVAL_DATASET_NAME"
-if [[ -z "$dataset_path" ]]; then
-  dataset_path="tasklets/data/$task"
-fi
-if [[ ! -d "$dataset_path" && ! -f "$dataset_path" ]]; then
-  echo "Dataset path does not exist: $dataset_path"
-  echo "Set --eval-dataset-name to a valid local path or dataset id."
-  exit 1
-fi
 
 eval_cmd=(
   python tasklets/evaluate.py
