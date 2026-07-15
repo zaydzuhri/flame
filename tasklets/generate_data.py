@@ -323,6 +323,48 @@ def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, num
     y = y + ["_"] * (max_len - len(y))
     return {"x": x, "y": y}
 
+# def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
+#     # output:
+#     # x: 1 2 8 3 4 5 6 | 3 4 7 1 2
+#     # y: _ _ _ _ _ _ _ _ _ 4 _ _ 2
+#     # base sequence with occasional noise token
+#     # make sure to have two different vocabularies for key and value AND noise
+#     # make noise token vocab size scale with seq_len and noise_prob (but less than 1/3 of total vocab)
+#     noise_seq_len = int(seq_len * noise_prob)
+#     signal_seq_len = seq_len - noise_seq_len
+#     noise_vocab_size = min(vocab_size // 3, noise_seq_len)
+#     seq_vocab_size = vocab_size - noise_vocab_size
+#     noise_vocab_start = seq_vocab_size + 1
+#     s = make_recall_seq(signal_seq_len, seq_vocab_size)
+#     # insert noise_seq_len noise tokens at random positions in s
+#     noise_prefix = s.copy()
+#     for _ in range(noise_seq_len):
+#         noise_token = random.randint(noise_vocab_start, vocab_size)
+#         insert_pos = random.randint(0, len(s))
+#         noise_prefix.insert(insert_pos, noise_token)
+#     # choose query positions on even indices on the original sequence to define the labels
+#     positions = sorted(random.sample(range(0, len(s) - 1, 2), num_queries))
+#     queries = [s[p] for p in positions]
+#     x = to_str(noise_prefix) + ["|"]
+#     for i, q in enumerate(queries):
+#         x.append(str(q))
+#         x.append("?")
+
+#     # total outputs = prefix length + delimiter '|' + 2 tokens per query
+#     pad_len = len(noise_prefix) + 1 + 2 * len(queries)
+#     y = ["_"] * pad_len
+
+#     # fill answer slots at end
+#     answers = []
+#     for pos in positions:
+#         answers.append(str(s[pos + 1]))  # successor
+#         answers.append("_")
+#     # remove last underscore
+#     answers = answers[:-1]
+#     y[-len(answers):] = answers
+#     return {"x": x, "y": y}
+
+# make noisy recall the same as multi recall but with noise tokens inserted in the prefix sequence
 def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
     # output:
     # x: 1 2 8 3 4 5 6 | 3 4 7 1 2
@@ -340,28 +382,19 @@ def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noi
     noise_prefix = s.copy()
     for _ in range(noise_seq_len):
         noise_token = random.randint(noise_vocab_start, vocab_size)
-        insert_pos = random.randint(0, len(s))
+        insert_pos = random.randint(0, len(noise_prefix))
         noise_prefix.insert(insert_pos, noise_token)
-    # choose query positions on even indices on the original sequence to define the labels
+    # sample distinct positions at an even index on the original sequence to define the labels
     positions = sorted(random.sample(range(0, len(s) - 1, 2), num_queries))
     queries = [s[p] for p in positions]
+    values = [s[p + 1] for p in positions]
     x = to_str(noise_prefix) + ["|"]
-    for i, q in enumerate(queries):
+    y = ["_"] * (len(noise_prefix) + 1)
+    for q, v in zip(queries, values):
         x.append(str(q))
-        x.append("?")
+        x.append(str(v))
+        y.extend(["_", str(v)])
 
-    # total outputs = prefix length + delimiter '|' + 2 tokens per query
-    pad_len = len(noise_prefix) + 1 + 2 * len(queries)
-    y = ["_"] * pad_len
-
-    # fill answer slots at end
-    answers = []
-    for pos in positions:
-        answers.append(str(s[pos + 1]))  # successor
-        answers.append("_")
-    # remove last underscore
-    answers = answers[:-1]
-    y[-len(answers):] = answers
     return {"x": x, "y": y}
 
 # === Copy tasks ===
