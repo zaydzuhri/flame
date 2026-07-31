@@ -11,6 +11,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import fla
+import custom_models
 
 TASK_CHOICES = [
     "single_recall", # works
@@ -29,6 +30,8 @@ TASK_CHOICES = [
     "anbncn_language", # works
     "sorting", # works but should be generated not teacher-forced
     "counting", # works
+    "modular_addition",
+    "permutation_composition",
 ]
 
 SINGLE_TARGET_TASKS = {
@@ -45,6 +48,8 @@ SEQUENCE_EXACT_MATCH_TASKS = {
     "selective_copy",
     "fuzzy_recall",
     "sorting",
+    "modular_addition",
+    "permutation_composition",
 }
 
 GENERATED_SEQUENCE_TASKS = {

@@ -572,6 +572,54 @@ def gen_sorting_sample(seq_len: int, vocab_size: int, num_unique_toks: int) -> D
 
     return {"x": x, "y": y}
 
+# === Arithmetic tasks ===
+
+def gen_modular_addition_sample(seq_len: int, modulus: int) -> Dict:
+    # output:
+    # x: 3 5 2 7
+    # y: 3 0 2 2   (running sums mod 8)
+    if modulus <= 0:
+        raise ValueError("modulus must be a positive integer")
+
+    operands = [random.randint(0, modulus - 1) for _ in range(seq_len)]
+    running = 0
+    outputs = []
+    for operand in operands:
+        running = (running + operand) % modulus
+        outputs.append(running)
+
+    shifted_outputs = ["_"] + to_str(outputs[:-1])
+    return {"x": to_str(operands), "y": shifted_outputs}
+
+def _build_perm_index(perm_size: int):
+    """Return (list_of_all_perms, perm_to_idx dict) for S_{perm_size}."""
+    import itertools
+    all_perms = list(itertools.permutations(range(perm_size)))
+    perm_to_idx = {p: i for i, p in enumerate(all_perms)}
+    return all_perms, perm_to_idx
+
+def gen_permutation_composition_sample(
+    seq_len: int,
+    all_perms: list,
+    perm_to_idx: dict,
+    perm_size: int,
+) -> Dict:
+    # Encodes the symmetric group S_{perm_size}.
+    # Each permutation is a single token: its index in the enumeration of S_n.
+    # Vocabulary size = n! (e.g. 120 for S5).
+    # x: i1 i2 i3 ...   (each i_k is a permutation index, 0..n!-1)
+    # y: r1 r2 r3 ...   (each r_k is the running left-to-right composition index)
+    # i.e. r_k[pos] = p_k[r_{k-1}[pos]]
+    running = tuple(range(perm_size))  # identity
+    xs, ys = [], []
+    for _ in range(seq_len):
+        perm = random.choice(all_perms)
+        running = tuple(perm[running[i]] for i in range(perm_size))
+        xs.append(perm_to_idx[perm])
+        ys.append(perm_to_idx[running])
+    shifted_ys = ["_"] + to_str(ys[:-1])
+    return {"x": to_str(xs), "y": shifted_ys}
+
 # === State-tracking tasks ===
 
 def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
@@ -597,6 +645,30 @@ def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
             x.extend(["o", str(token)])
             y.extend(["_", str(token)])
     return {"x": x, "y": y}
+
+# def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
+#     # output:
+#     # x: i 2 i 1 o 1 o 2 i 4 o 4
+#     # y: _ _ _ _ _ 1 _ 2 _ _ _ 4
+#     x = []
+#     y = []
+#     stack = []
+#     for _ in range(seq_len//2):
+#         # sample operation (but only allow pop if stack is not empty)
+#         if len(stack) == 0:
+#             op = "i"
+#         else:
+#             op = random.choice(["i", "o"])
+#         if op == "i":
+#             token = random.randint(1, vocab_size)
+#             stack.append(token)
+#             x.extend(["i", str(token)])
+#             y.extend(["_", "_"])
+#         else:
+#             token = stack.pop()
+#             x.extend(["o"])
+#             y.extend([str(token)])
+#     return {"x": x, "y": y}
 
 def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
     # output:
@@ -786,6 +858,8 @@ def build_arg_parser():
                             "anbncn_language",
                             "sorting",
                             "counting",
+                            "modular_addition",
+                            "permutation_composition",
                         ],
                         help="Which task to generate.")
     parser.add_argument("--output-dir", type=str, default=None,
@@ -817,6 +891,10 @@ def build_arg_parser():
                         help="Number of unique tokens for sorting task.")
     parser.add_argument("--num-stacks", type=int, default=2,
                         help="Number of stacks for the multi-stack operations task.")
+    parser.add_argument("--modulus", type=int, default=None,
+                        help="Modulus for modular addition task. Defaults to --vocab-size when unset.")
+    parser.add_argument("--perm-size", type=int, default=5,
+                        help="Permutation size n (implements S_n) for permutation_composition task.")
     parser.add_argument("--upload-to-hf", action="store_true",
                         help="Upload generated train/test splits to the Hugging Face Hub.")
     parser.add_argument("--hf-repo-id", type=str, default=None,
@@ -900,6 +978,17 @@ def main():
     elif args.task == "anbncn_language":
         train_sample_fn = lambda: gen_anbncn_language_sample(args.seq_len, args.vocab_size)
         test_sample_fn = lambda: gen_anbncn_language_sample(args.seq_len, args.vocab_size)
+    elif args.task == "modular_addition":
+        modulus = args.modulus if args.modulus is not None else args.vocab_size
+        train_sample_fn = lambda: gen_modular_addition_sample(args.seq_len, modulus)
+        test_sample_fn = lambda: gen_modular_addition_sample(args.seq_len, modulus)
+    elif args.task == "permutation_composition":
+        perm_size = args.perm_size
+        all_perms, perm_to_idx = _build_perm_index(perm_size)
+        vocab_size = len(all_perms)  # n!
+        print(f"S{perm_size}: vocabulary size = {vocab_size}")
+        train_sample_fn = lambda: gen_permutation_composition_sample(args.seq_len, all_perms, perm_to_idx, perm_size)
+        test_sample_fn = lambda: gen_permutation_composition_sample(args.seq_len, all_perms, perm_to_idx, perm_size)
     else:
         raise ValueError(f"Unknown task {args.task}")
 
