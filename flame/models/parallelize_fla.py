@@ -252,9 +252,14 @@ def apply_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
-    tp_plan = TP_PLAN_MAP[model.config.model_type](
-        model, loss_parallel=loss_parallel, enable_float8=enable_float8
-    )
+    plan_cls = TP_PLAN_MAP.get(model.config.model_type)
+    if plan_cls is None:
+        raise NotImplementedError(
+            f"Tensor Parallelism is not implemented for model_type='{model.config.model_type}'. "
+            "Set --training.tensor_parallel_degree 1 for this model."
+        )
+
+    tp_plan = plan_cls(model, loss_parallel=loss_parallel, enable_float8=enable_float8)
     parallelize_module(model, tp_mesh, tp_plan.model_plan)
 
     blocks = get_blocks(model)
