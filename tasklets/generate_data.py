@@ -591,10 +591,23 @@ def gen_modular_addition_sample(seq_len: int, modulus: int) -> Dict:
     shifted_outputs = ["_"] + to_str(outputs[:-1])
     return {"x": to_str(operands), "y": shifted_outputs}
 
-def _build_perm_index(perm_size: int):
-    """Return (list_of_all_perms, perm_to_idx dict) for S_{perm_size}."""
+def _is_even_permutation(perm: Tuple[int, ...]) -> bool:
+    """Return True iff permutation parity is even."""
+    inversions = 0
+    for i in range(len(perm)):
+        for j in range(i + 1, len(perm)):
+            if perm[i] > perm[j]:
+                inversions += 1
+    return inversions % 2 == 0
+
+def _build_alt_perm_index(perm_size: int):
+    """Return (list_of_even_perms, perm_to_idx dict) for A_{perm_size}."""
     import itertools
-    all_perms = list(itertools.permutations(range(perm_size)))
+    all_perms = [
+        perm
+        for perm in itertools.permutations(range(perm_size))
+        if _is_even_permutation(perm)
+    ]
     perm_to_idx = {p: i for i, p in enumerate(all_perms)}
     return all_perms, perm_to_idx
 
@@ -604,10 +617,10 @@ def gen_permutation_composition_sample(
     perm_to_idx: dict,
     perm_size: int,
 ) -> Dict:
-    # Encodes the symmetric group S_{perm_size}.
-    # Each permutation is a single token: its index in the enumeration of S_n.
-    # Vocabulary size = n! (e.g. 120 for S5).
-    # x: i1 i2 i3 ...   (each i_k is a permutation index, 0..n!-1)
+    # Encodes the alternating group A_{perm_size} (even permutations only).
+    # Each permutation is a single token: its index in the enumeration of A_n.
+    # Vocabulary size = n!/2 (e.g. 60 for A5).
+    # x: i1 i2 i3 ...   (each i_k is a permutation index, 0..|A_n|-1)
     # y: r1 r2 r3 ...   (each r_k is the running left-to-right composition index)
     # i.e. r_k[pos] = p_k[r_{k-1}[pos]]
     running = tuple(range(perm_size))  # identity
@@ -894,7 +907,7 @@ def build_arg_parser():
     parser.add_argument("--modulus", type=int, default=None,
                         help="Modulus for modular addition task. Defaults to --vocab-size when unset.")
     parser.add_argument("--perm-size", type=int, default=5,
-                        help="Permutation size n (implements S_n) for permutation_composition task.")
+                        help="Unused for permutation_composition; task is hardcoded to A5.")
     parser.add_argument("--upload-to-hf", action="store_true",
                         help="Upload generated train/test splits to the Hugging Face Hub.")
     parser.add_argument("--hf-repo-id", type=str, default=None,
@@ -983,10 +996,10 @@ def main():
         train_sample_fn = lambda: gen_modular_addition_sample(args.seq_len, modulus)
         test_sample_fn = lambda: gen_modular_addition_sample(args.seq_len, modulus)
     elif args.task == "permutation_composition":
-        perm_size = args.perm_size
-        all_perms, perm_to_idx = _build_perm_index(perm_size)
-        vocab_size = len(all_perms)  # n!
-        print(f"S{perm_size}: vocabulary size = {vocab_size}")
+        perm_size = 5
+        all_perms, perm_to_idx = _build_alt_perm_index(perm_size)
+        vocab_size = len(all_perms)  # n!/2
+        print(f"A5: vocabulary size = {vocab_size}")
         train_sample_fn = lambda: gen_permutation_composition_sample(args.seq_len, all_perms, perm_to_idx, perm_size)
         test_sample_fn = lambda: gen_permutation_composition_sample(args.seq_len, all_perms, perm_to_idx, perm_size)
     else:
