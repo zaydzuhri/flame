@@ -41,7 +41,6 @@ class GRUBlock(nn.Module):
             hidden_size=config.hidden_size,
             layer_idx=layer_idx,
             bias=config.gru_bias,
-            recurrent_use_triton=config.recurrent_use_triton,
         )
 
         self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)

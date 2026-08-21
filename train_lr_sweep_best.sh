@@ -386,7 +386,7 @@ fi
 dataset_path="$EVAL_DATASET_NAME"
 
 eval_cmd=(
-  python tasklets/evaluate.py
+  python -m tasklets.evaluate
   --model-name "$BEST_PATH"
   --task "$task"
   --dataset-name "$dataset_path"

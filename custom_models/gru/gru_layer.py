@@ -7,24 +7,18 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from .gru_kernels import gru_scan
-
-
 class GRUMixer(nn.Module):
     def __init__(
         self,
         hidden_size: int,
         layer_idx: int,
         bias: bool = True,
-        recurrent_use_triton: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.layer_idx = layer_idx
-        self.recurrent_use_triton = recurrent_use_triton
 
-        self.x_proj = nn.Linear(hidden_size, 3 * hidden_size, bias=bias)
-        self.h_proj = nn.Linear(hidden_size, 3 * hidden_size, bias=bias)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, bias=bias)
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False)
 
     def _get_layer_past(self, past_key_values) -> Optional[torch.Tensor]:
@@ -47,14 +41,25 @@ class GRUMixer(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         layer_past = self._get_layer_past(past_key_values)
 
-        recurrent_outputs, recurrent_last = gru_scan(
-            hidden_states=hidden_states,
-            initial_state=layer_past,
-            x_proj=self.x_proj,
-            h_proj=self.h_proj,
-            attention_mask=attention_mask,
-            prefer_triton=self.recurrent_use_triton,
-        )
+        batch_size = hidden_states.shape[0]
+        if layer_past is None:
+            initial_state = hidden_states.new_zeros(1, batch_size, self.hidden_size)
+        else:
+            initial_state = layer_past.to(dtype=hidden_states.dtype, device=hidden_states.device).unsqueeze(0)
+
+        if attention_mask is None:
+            recurrent_outputs, recurrent_state = self.gru(hidden_states, initial_state)
+        else:
+            recurrent_outputs = []
+            recurrent_state = initial_state
+            for token in hidden_states.transpose(0, 1):
+                _, next_state = self.gru(token.unsqueeze(1), recurrent_state)
+                mask = attention_mask[:, len(recurrent_outputs)].to(dtype=hidden_states.dtype, device=hidden_states.device)
+                recurrent_state = mask.view(1, batch_size, 1) * next_state + (1 - mask).view(1, batch_size, 1) * recurrent_state
+                recurrent_outputs.append(recurrent_state.squeeze(0))
+            recurrent_outputs = torch.stack(recurrent_outputs, dim=1)
+
+        recurrent_last = recurrent_state.squeeze(0)
         outputs = self.o_proj(recurrent_outputs)
 
         attentions = None if not output_attentions else ()

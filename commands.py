@@ -2,8 +2,8 @@
 from pathlib import Path
 import itertools
 
-ARCHITECTURES = ["abc", "comba", "delta_net", "forgetting_transformer", "gated_deltanet", "gated_deltaproduct", "gla", "hgrn", "hgrn2", "kda", "lightnet", "mamba", "mamba2", "mesa_net", "mla", "mom", "path_attn", "retnet", "rodimus", "rwkv6", "rwkv7", "samba", "transformer"]
-TASKS = ["multi-recall", "fuzzy-recall", "noisy-recall", "full-copy", "reverse-copy", "selective-copy", "memorization", "counting", "sorting", "single-stack-ops", "multi-stack-ops", "flip-flop", "dyck-language", "anbncn-language"]
+ARCHITECTURES = ["gru", "lstm", "abc", "comba", "delta_net", "forgetting_transformer", "gated_deltanet", "gated_deltaproduct", "gla", "hgrn", "hgrn2", "kda", "lightnet", "mamba", "mamba2", "mesa_net", "mla", "mom", "path_attn", "retnet", "rodimus", "rwkv6", "rwkv7", "samba", "transformer"]
+TASKS = ["multi-recall", "fuzzy-recall", "noisy-recall", "full-copy", "reverse-copy", "selective-copy", "memorization", "counting", "sorting", "single-stack-ops", "multi-stack-ops", "flip-flop", "dyck-language", "anbncn-language", "modular-addition", "permutation-composition"]
 
 OUT_FILE = "commands.txt"
 

@@ -29,7 +29,6 @@ class LSTMConfig(PretrainedConfig):
         fuse_cross_entropy: bool = True,
         vocab_size: int = 32000,
         lstm_bias: bool = True,
-        recurrent_use_triton: bool = False,
         **kwargs,
     ):
         self.hidden_size = hidden_size
@@ -50,7 +49,6 @@ class LSTMConfig(PretrainedConfig):
         self.vocab_size = vocab_size
 
         self.lstm_bias = lstm_bias
-        self.recurrent_use_triton = recurrent_use_triton
 
         super().__init__(
             pad_token_id=pad_token_id,
