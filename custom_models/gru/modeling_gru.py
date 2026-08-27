@@ -16,7 +16,6 @@ from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss
-from fla.modules import GatedMLP as GRUMLP
 from fla.modules import RMSNorm
 
 from .config_gru import GRUConfig
@@ -43,15 +42,6 @@ class GRUBlock(nn.Module):
             bias=config.gru_bias,
         )
 
-        self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
-        self.mlp = GRUMLP(
-            hidden_size=config.hidden_size,
-            hidden_ratio=config.hidden_ratio,
-            intermediate_size=config.intermediate_size,
-            hidden_act=config.hidden_act,
-            fuse_swiglu=config.fuse_swiglu,
-        )
-
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -71,15 +61,6 @@ class GRUBlock(nn.Module):
             output_attentions=output_attentions,
             **kwargs,
         )
-
-        if self.config.fuse_norm:
-            hidden_states, residual = self.mlp_norm(hidden_states, residual, True)
-        else:
-            hidden_states = residual + hidden_states
-            residual = hidden_states
-            hidden_states = self.mlp_norm(hidden_states)
-
-        hidden_states = self.mlp(hidden_states, **kwargs)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
