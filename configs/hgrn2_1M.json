@@ -2,7 +2,7 @@
     "attn_mode": "chunk",
     "bos_token_id": 1,
     "eos_token_id": 2,
-    "expand_ratio": 128,
+    "expand_ratio": null,
     "fuse_cross_entropy": true,
     "fuse_norm": true,
     "hidden_act": "swish",

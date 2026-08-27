@@ -16,7 +16,7 @@
   "num_hidden_layers": 2,
   "pad_token_id": 0,
   "rescale_prenorm_residual": true,
-  "residual_in_fp32": true,
+  "residual_in_fp32": false,
   "rms_norm": true,
   "state_size": 16,
   "tie_word_embeddings": false,
