@@ -572,7 +572,175 @@ def gen_sorting_sample(seq_len: int, vocab_size: int, num_unique_toks: int) -> D
 
     return {"x": x, "y": y}
 
-# === Arithmetic tasks ===
+# === State-tracking tasks ===
+
+# this version shows the outputs in the input sequence (could be too easy)
+# def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
+#     # output:
+#     # x: i 2 i 1 o 1 o 2 i 4 o 4
+#     # y: _ _ _ __  1 _ 2 _ _ _ 4
+#     x = []
+#     y = []
+#     stack = []
+#     for _ in range(seq_len//2):
+#         # sample operation (but only allow pop if stack is not empty)
+#         if len(stack) == 0:
+#             op = "i"
+#         else:
+#             op = random.choice(["i", "o"])
+#         if op == "i":
+#             token = random.randint(1, vocab_size)
+#             stack.append(token)
+#             x.extend(["i", str(token)])
+#             y.extend(["_", "_"])
+#         else:
+#             token = stack.pop()
+#             x.extend(["o", str(token)])
+#             y.extend(["_", str(token)])
+#     return {"x": x, "y": y}
+
+# this version forces the model to have internal state tracking
+def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: i 2 i 1 o o i 4 o
+    # y: _ _ _ _ 1 2 _ _ 4
+    x = []
+    y = []
+    stack = []
+    for _ in range(seq_len//2):
+        # sample operation (but only allow pop if stack is not empty)
+        if len(stack) == 0:
+            op = "i"
+        else:
+            op = random.choice(["i", "o"])
+        if op == "i":
+            token = random.randint(1, vocab_size)
+            stack.append(token)
+            x.extend(["i", str(token)])
+            y.extend(["_", "_"])
+        else:
+            token = stack.pop()
+            x.extend(["o"])
+            y.extend([str(token)])
+    return {"x": x, "y": y}
+
+# visible outputs version
+# def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
+#     # output:
+#     # x: i 0 2 i 1 1 o 0 2 o 1 1 i 0 4 o 0 4
+#     # y: _ _ _ _ _ _ _ _ 2 _ _ 1 _ _ _ _ _ 4
+#     x = []
+#     y = []
+#     stacks = [[] for _ in range(num_stacks)]
+#     for _ in range(seq_len//3):
+#         # sample stack and operation (but only allow pop if stack is not empty)
+#         stack_idx = random.randint(0, num_stacks - 1)
+#         if len(stacks[stack_idx]) == 0:
+#             op = "i"
+#         else:
+#             op = random.choice(["i", "o"])
+#         if op == "i":
+#             token = random.randint(1, vocab_size)
+#             stacks[stack_idx].append(token)
+#             x.extend(["i", str(stack_idx), str(token)])
+#             y.extend(["_", "_", "_"])
+#         else:
+#             token = stacks[stack_idx].pop()
+#             x.extend(["o", str(stack_idx), str(token)])
+#             y.extend(["_", "_", str(token)])
+#     return {"x": x, "y": y}
+
+# hidden outputs version
+def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
+    # output:
+    # x: i 0 2 i 1 1 o 0 o 1 _ i 0 4 o 0
+    # y: _ _ _ _ _ _ _ 2 _ 1 _ _ _ _ _ 4
+    x = []
+    y = []
+    stacks = [[] for _ in range(num_stacks)]
+    for _ in range(seq_len//3):
+        # sample stack and operation (but only allow pop if stack is not empty)
+        stack_idx = random.randint(0, num_stacks - 1)
+        if len(stacks[stack_idx]) == 0:
+            op = "i"
+        else:
+            op = random.choice(["i", "o"])
+        if op == "i":
+            token = random.randint(1, vocab_size)
+            stacks[stack_idx].append(token)
+            x.extend(["i", str(stack_idx), str(token)])
+            y.extend(["_", "_", "_"])
+        else:
+            token = stacks[stack_idx].pop()
+            x.extend(["o", str(stack_idx)])
+            y.extend(["_", str(token)])
+    return {"x": x, "y": y}
+
+# def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
+#     # output:
+#     # x: w 0 i 1 r 0 i 0 w 1 r 1
+#     # y: _ _ _ _ _ 0 _ _ _ _ _ 1
+#     x = []
+#     y = []
+#     state = None
+#     for i in range(seq_len//2):
+#         op_choices = ["w"] if state is None else ["r", "i", "i"]
+#         # make sure that the last op is "r", so we also need to make sure there is a state written at the second to last step
+#         if i == seq_len//2 - 1 and state is not None:
+#             op = "r"
+#         elif i == seq_len//2 - 2 and state is None:
+#             op = "w"
+#         elif i == seq_len//2 - 2 and state is not None:
+#             op = "i"
+#         else:
+#             op = random.choice(op_choices)
+#         token = random.randint(1, vocab_size)
+#         if op == "w":
+#             x.extend([op, str(token)])
+#             y.extend(["_", "_"])
+#             state = token
+#         elif op == "r":
+#             x.extend([op, str(state)])
+#             y.extend(["_", str(state)])
+#             state = None
+#         else:
+#             x.extend([op, str(token)])
+#             y.extend(["_", "_"])
+#     return {"x": x, "y": y}
+
+def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
+    # output:
+    # x: w 0 i 1 r 0 i 0 w 1 r 1
+    # y: _ _ _ _ _ 0 _ _ _ _ _ 1
+    x = []
+    y = []
+    state = None
+    for i in range(seq_len//2):
+        op_choices = ["w"] if state is None else ["r", "i", "i"]
+        # make sure that the last op is "r", so we also need to make sure there is a state written at the second to last step
+        if i == seq_len//2 - 1 and state is not None:
+            op = "r"
+        elif i == seq_len//2 - 2 and state is None:
+            op = "w"
+        elif i == seq_len//2 - 2 and state is not None:
+            op = "i"
+        else:
+            op = random.choice(op_choices)
+        token = random.randint(1, vocab_size)
+        if op == "w":
+            x.extend([op, str(token)])
+            y.extend(["_", "_"])
+            state = token
+        elif op == "r":
+            x.extend([op])
+            y.extend([str(state)])
+            state = None
+        else:
+            x.extend([op, str(token)])
+            y.extend(["_", "_"])
+    return {"x": x, "y": y}
+
+# === Arithmetic state tracking tasks ===
 
 def gen_modular_addition_sample(seq_len: int, modulus: int) -> Dict:
     # output:
@@ -632,113 +800,6 @@ def gen_permutation_composition_sample(
         ys.append(perm_to_idx[running])
     shifted_ys = ["_"] + to_str(ys[:-1])
     return {"x": to_str(xs), "y": shifted_ys}
-
-# === State-tracking tasks ===
-
-def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
-    # output:
-    # x: i 2 i 1 o 1 o 2 i 4 o 4
-    # y: _ _ _ __  1 _ 2 _ _ _ 4
-    x = []
-    y = []
-    stack = []
-    for _ in range(seq_len//2):
-        # sample operation (but only allow pop if stack is not empty)
-        if len(stack) == 0:
-            op = "i"
-        else:
-            op = random.choice(["i", "o"])
-        if op == "i":
-            token = random.randint(1, vocab_size)
-            stack.append(token)
-            x.extend(["i", str(token)])
-            y.extend(["_", "_"])
-        else:
-            token = stack.pop()
-            x.extend(["o", str(token)])
-            y.extend(["_", str(token)])
-    return {"x": x, "y": y}
-
-# def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
-#     # output:
-#     # x: i 2 i 1 o 1 o 2 i 4 o 4
-#     # y: _ _ _ _ _ 1 _ 2 _ _ _ 4
-#     x = []
-#     y = []
-#     stack = []
-#     for _ in range(seq_len//2):
-#         # sample operation (but only allow pop if stack is not empty)
-#         if len(stack) == 0:
-#             op = "i"
-#         else:
-#             op = random.choice(["i", "o"])
-#         if op == "i":
-#             token = random.randint(1, vocab_size)
-#             stack.append(token)
-#             x.extend(["i", str(token)])
-#             y.extend(["_", "_"])
-#         else:
-#             token = stack.pop()
-#             x.extend(["o"])
-#             y.extend([str(token)])
-#     return {"x": x, "y": y}
-
-def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
-    # output:
-    # x: i 0 2 i 1 1 o 0 2 o 1 1 i 0 4 o 0 4
-    # y: _ _ _ _ _ _ _ _ 2 _ _ 1 _ _ _ _ _ 4
-    x = []
-    y = []
-    stacks = [[] for _ in range(num_stacks)]
-    for _ in range(seq_len//3):
-        # sample stack and operation (but only allow pop if stack is not empty)
-        stack_idx = random.randint(0, num_stacks - 1)
-        if len(stacks[stack_idx]) == 0:
-            op = "i"
-        else:
-            op = random.choice(["i", "o"])
-        if op == "i":
-            token = random.randint(1, vocab_size)
-            stacks[stack_idx].append(token)
-            x.extend(["i", str(stack_idx), str(token)])
-            y.extend(["_", "_", "_"])
-        else:
-            token = stacks[stack_idx].pop()
-            x.extend(["o", str(stack_idx), str(token)])
-            y.extend(["_", "_", str(token)])
-    return {"x": x, "y": y}
-
-def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
-    # output:
-    # x: w 0 i 1 r 0 i 0 w 1 r 1
-    # y: _ _ _ _ _ 0 _ _ _ _ _ 1
-    x = []
-    y = []
-    state = None
-    for i in range(seq_len//2):
-        op_choices = ["w"] if state is None else ["r", "i", "i"]
-        # make sure that the last op is "r", so we also need to make sure there is a state written at the second to last step
-        if i == seq_len//2 - 1 and state is not None:
-            op = "r"
-        elif i == seq_len//2 - 2 and state is None:
-            op = "w"
-        elif i == seq_len//2 - 2 and state is not None:
-            op = "i"
-        else:
-            op = random.choice(op_choices)
-        token = random.randint(1, vocab_size)
-        if op == "w":
-            x.extend([op, str(token)])
-            y.extend(["_", "_"])
-            state = token
-        elif op == "r":
-            x.extend([op, str(state)])
-            y.extend(["_", str(state)])
-            state = None
-        else:
-            x.extend([op, str(token)])
-            y.extend(["_", "_"])
-    return {"x": x, "y": y}
 
 # === Formal language tasks ===
 

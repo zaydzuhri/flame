@@ -34,14 +34,14 @@ TASK_CHOICES = [
     "permutation_composition",
 ]
 
-SINGLE_TARGET_TASKS = {
+SINGLE_TARGET_TASKS = { # token_accuracy
     "single_recall",
     "counting",
     "dyck_language",
     "anbncn_language",
 }
 
-SEQUENCE_EXACT_MATCH_TASKS = {
+SEQUENCE_EXACT_MATCH_TASKS = { # exact_match_accuracy
     "full_copy",
     "reverse_copy",
     "reversal",
@@ -52,21 +52,21 @@ SEQUENCE_EXACT_MATCH_TASKS = {
     "permutation_composition",
 }
 
-GENERATED_SEQUENCE_TASKS = {
+GENERATED_SEQUENCE_TASKS = { # not used
     "full_copy",
     "reverse_copy",
     "selective_copy",
     "sorting",
 }
 
-SPARSE_TOKEN_TASKS = {
+SPARSE_TOKEN_TASKS = { # token_accuracy
     "memorization",
     "single_stack_ops",
     "multi_stack_ops",
     "flip_flop",
 }
 
-QUERY_EXACT_MATCH_TASKS = {
+QUERY_EXACT_MATCH_TASKS = { # exact_match_accuracy
     "multi_recall",
     "noisy_recall",
 }
