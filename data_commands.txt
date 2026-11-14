@@ -1,0 +1,31 @@
+python generate_data.py --task multi_recall --num-queries 32 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/multi-recall
+
+python generate_data.py --task fuzzy_recall --window-size 4 --num-queries 32 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/fuzzy-recall
+
+python generate_data.py --task noisy_recall --num-queries 32 --noise-prob 0.3 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/noisy-recall
+
+python generate_data.py --task full_copy --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/full-copy
+
+python generate_data.py --task reverse_copy --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/reverse-copy
+
+python generate_data.py --task selective_copy --noise-prob 0.3 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/selective-copy
+
+python generate_data.py --task memorization --num-keys 10000 --key-len 3 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/memorization
+
+python generate_data.py --task counting --max-count 50 --num-queries 4 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/counting
+
+python generate_data.py --task sorting --num-unique-toks 10 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/sorting
+
+python generate_data.py --task single_stack_ops --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/single-stack-ops
+
+python generate_data.py --task multi_stack_ops --num-stacks 4 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/multi-stack-ops
+
+python generate_data.py --task flip_flop --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/flip-flop
+
+python generate_data.py --task dyck_language --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/dyck-language
+
+python generate_data.py --task anbncn_language --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/anbncn-language
+
+python generate_data.py --task modular_addition --modulus 10 --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/modular-addition
+
+python generate_data.py --task permutation_composition --num-train 100000 --num-test 3000 --seq-len 128 --vocab-size 256 --seed 79 --upload-to-hf --hf-repo-id zaydzuhri/permutation-composition

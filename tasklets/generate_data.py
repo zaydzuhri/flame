@@ -41,56 +41,6 @@ def make_recall_seq(seq_len: int, vocab_size: int, unique_pairs: bool = False) -
             s.append(v)
     return s
 
-# def make_recall_seq(seq_len: int, vocab_size: int) -> List[int]:
-#     # make sure to have two different vocabularies for key and value
-#     keys = make_int_seq(seq_len, list(range(1, vocab_size + 1)))
-#     values = make_choices_int_seq(seq_len, list(range(1, vocab_size + 1)))
-#     # interleave keys and values
-#     s: List[int] = []
-#     for k, v in zip(keys, values):
-#         s.append(k)
-#         s.append(v)
-#     return s
-
-# def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int, unique_pairs: bool = False) -> List[int]:
-#     # make sure to have two different vocabularies for key and value
-#     key_vocab_size = vocab_size // 2 
-#     val_vocab_size = vocab_size - key_vocab_size
-#     key_nums = list(range(1, key_vocab_size + 1))
-#     val_nums = list(range(key_vocab_size + 1, vocab_size + 1))
-#     # create random blobs of maximum length within both key and value vocab, then interleave them
-#     key_blobs = []
-#     for _ in range(key_vocab_size):
-#         blob_len = random.randint(1, window_size)
-#         blob = random.sample(key_nums, min(blob_len, len(key_nums)))
-#         key_blobs.append(blob)
-#     val_blobs = []
-#     for _ in range(val_vocab_size):
-#         blob_len = random.randint(1, window_size)
-#         blob = random.sample(val_nums, min(blob_len, len(val_nums)))
-#         val_blobs.append(blob)
-#     # interleave keys and values
-#     s: List[int] = []
-#     if unique_pairs:
-#         keys = make_int_seq(seq_len, key_blobs)
-#         values = make_int_seq(seq_len, val_blobs)
-#         for k, v in zip(keys, values):
-#             s.append(k)
-#             s.append(v)
-#     else:
-#         kv_map = {}
-#         for _ in range(seq_len // 2):
-#             k = random.choice(key_blobs)
-#             k_tuple = tuple(k)
-#             if k_tuple not in kv_map:
-#                 v = random.choice(val_blobs)
-#                 kv_map[k_tuple] = v
-#             else:
-#                 v = kv_map[k_tuple]
-#             s.append(k)
-#             s.append(v)
-#     return s
-
 # make key_blobs and val_blobs global so we can reuse them across samples for the fuzzy recall task, otherwise we can't guarantee the same key blob will have the same value blob across samples which breaks the task
 def make_fuzzy_recall_seq(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]], unique_pairs: bool = False) -> List[int]:
     # interleave keys and values
@@ -204,35 +154,6 @@ def gen_single_query_recall_sample(seq_len: int, vocab_size: int) -> Dict:
     y = ["_"] * (len(s) + 2) + [str(v)]
     return {"x": x, "y": y}
 
-# def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: int) -> Dict:
-#     # output:
-#     # x: 1 2 3 4 5 6 | 3 4 1 2
-#     # y: _ _ _ _ _ _ _ _ 4 _ 2
-#     # make sure to have two different vocabularies for key and value
-#     s = make_recall_seq(seq_len, vocab_size)
-#     # sample distinct positions at an even index, avoid last index for successor
-#     positions = sorted(random.sample(range(0, seq_len - 1, 2), num_queries))
-#     queries = [s[p] for p in positions]
-#     x = to_str(s) + ["|"]
-#     # queries separated by 'm'
-#     for i, q in enumerate(queries):
-#         x.append(str(q))
-#         x.append("?")
-#     # total outputs = prefix length + delimiter '|' + 2 tokens per query
-#     pad_len = len(s) + 1 + 2 * len(queries)
-#     y = ["_"] * pad_len
-
-#     # fill answer slots at end
-#     answers = []
-#     for pos in positions:
-#         answers.append(str(s[pos + 1]))  # successor
-#         answers.append("_")
-
-#     # remove last underscore
-#     answers = answers[:-1]
-#     y[-len(answers):] = answers
-#     return {"x": x, "y": y}
-
 def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: int) -> Dict:
     # output:
     # x: 1 2 3 4 5 6 | 3 4 1 2
@@ -252,49 +173,6 @@ def gen_multi_query_recall_sample(seq_len: int, vocab_size: int, num_queries: in
         y.extend(["_", str(v)])
 
     return {"x": x, "y": y}
-
-# def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int) -> Dict:
-#     # output:
-#     # x: 1 2 3 4 5 6 | 2 3 4 5
-#     # y: _ _ _ _ _ _ _ _ _ _ 5
-#     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size) # this will be a list of lists (blobs)
-#     # do something similar like the previous recall sample function but then flatten at the end
-#     pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
-#     q = s[pos]
-#     v = s[pos + 1]
-#     s_flat = []
-#     for blob in s:
-#         s_flat.extend(blob)
-#     x = s_flat + ["|"] + q + v
-#     y = ["_"] * (len(s_flat) + 1 + len(q)) + v
-#     # then we have to make them all the same length
-#     # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
-#     max_len = window_size * len(s) + 1 + 2 * window_size
-#     x = x + ["_"] * (max_len - len(x))
-#     y = y + ["_"] * (max_len - len(y))
-#     return {"x": x, "y": y}
-
-# # make the key blobs and value blobs global
-# def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
-#     # output:
-#     # x: 1 2 3 4 5 6 | 2 3 4 5
-#     # y: _ _ _ _ _ _ _ _ _ _ 5
-#     s = make_fuzzy_recall_seq(seq_len, vocab_size, window_size, key_blobs, val_blobs) # this will be a list of lists (blobs)
-#     # do something similar like the previous recall sample function but then flatten at the end
-#     pos = random.choice(range(0, len(s) - 1, 2)) # choose a random position at an even index, but we can only guarantee the successor if it's not in the last blob
-#     q = s[pos]
-#     v = s[pos + 1]
-#     s_flat = []
-#     for blob in s:
-#         s_flat.extend(blob)
-#     x = s_flat + ["|"] + q + v
-#     y = ["_"] * (len(s_flat) + 1 + len(q)) + v
-#     # then we have to make them all the same length
-#     # the maximum possible length is if all blobs are of maximum size, which is window_size * number of blobs + 1 for the delimiter + 2 * the maximum blob size for the query and value
-#     max_len = window_size * len(s) + 1 + 2 * window_size
-#     x = x + ["_"] * (max_len - len(x))
-#     y = y + ["_"] * (max_len - len(y))
-#     return {"x": x, "y": y}
 
 # make it so that you can have multiple queries for the fuzzy recall sample
 def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, num_queries: int, key_blobs: List[List[int]], val_blobs: List[List[int]]) -> Dict:
@@ -322,47 +200,6 @@ def gen_fuzzy_recall_sample(seq_len: int, vocab_size: int, window_size: int, num
     x = x + ["_"] * (max_len - len(x))
     y = y + ["_"] * (max_len - len(y))
     return {"x": x, "y": y}
-
-# def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
-#     # output:
-#     # x: 1 2 8 3 4 5 6 | 3 4 7 1 2
-#     # y: _ _ _ _ _ _ _ _ _ 4 _ _ 2
-#     # base sequence with occasional noise token
-#     # make sure to have two different vocabularies for key and value AND noise
-#     # make noise token vocab size scale with seq_len and noise_prob (but less than 1/3 of total vocab)
-#     noise_seq_len = int(seq_len * noise_prob)
-#     signal_seq_len = seq_len - noise_seq_len
-#     noise_vocab_size = min(vocab_size // 3, noise_seq_len)
-#     seq_vocab_size = vocab_size - noise_vocab_size
-#     noise_vocab_start = seq_vocab_size + 1
-#     s = make_recall_seq(signal_seq_len, seq_vocab_size)
-#     # insert noise_seq_len noise tokens at random positions in s
-#     noise_prefix = s.copy()
-#     for _ in range(noise_seq_len):
-#         noise_token = random.randint(noise_vocab_start, vocab_size)
-#         insert_pos = random.randint(0, len(s))
-#         noise_prefix.insert(insert_pos, noise_token)
-#     # choose query positions on even indices on the original sequence to define the labels
-#     positions = sorted(random.sample(range(0, len(s) - 1, 2), num_queries))
-#     queries = [s[p] for p in positions]
-#     x = to_str(noise_prefix) + ["|"]
-#     for i, q in enumerate(queries):
-#         x.append(str(q))
-#         x.append("?")
-
-#     # total outputs = prefix length + delimiter '|' + 2 tokens per query
-#     pad_len = len(noise_prefix) + 1 + 2 * len(queries)
-#     y = ["_"] * pad_len
-
-#     # fill answer slots at end
-#     answers = []
-#     for pos in positions:
-#         answers.append(str(s[pos + 1]))  # successor
-#         answers.append("_")
-#     # remove last underscore
-#     answers = answers[:-1]
-#     y[-len(answers):] = answers
-#     return {"x": x, "y": y}
 
 # make noisy recall the same as multi recall but with noise tokens inserted in the prefix sequence
 def gen_noisy_recall_sample(seq_len: int, vocab_size: int, num_queries: int, noise_prob: float) -> Dict:
@@ -482,22 +319,6 @@ def make_memorization_sample_fns(
 
 # === Counting (count occurrences of a query token) ===
 
-# def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int) -> Dict:
-#     # output:
-#     # x: 3 4 4 1 3 4 | 4 3
-#     # y: _ _ _ _ _ _ _ _ 3
-#     count = random.randint(1, min(seq_len - 1, vocab_size - 1, max_count))
-#     query_token = random.randint(1, vocab_size)
-#     # make sure the query token appears count times in the sequence
-#     vocab_other = [i for i in range(1, vocab_size + 1) if i != query_token]
-#     seq = make_choices_int_seq(seq_len - count, vocab_other)
-#     for _ in range(count):
-#         insert_pos = random.randint(0, len(seq))
-#         seq.insert(insert_pos, query_token)
-#     x = to_str(seq) + ["|", str(query_token), str(count)]
-#     y = ["_"] * (len(seq) + 2) + [str(count)]
-#     return {"x": x, "y": y}
-
 # make it so that we count several numbers as targets instead of just one (so that we get more supervision per sample)
 def gen_counting_sample(seq_len: int, vocab_size: int, max_count: int, num_queries: int) -> Dict:
     # output:
@@ -574,7 +395,6 @@ def gen_sorting_sample(seq_len: int, vocab_size: int, num_unique_toks: int) -> D
 
 # === State-tracking tasks ===
 
-# this version shows the outputs in the input sequence (could be too easy)
 # def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
 #     # output:
 #     # x: i 2 i 1 o 1 o 2 i 4 o 4
@@ -599,11 +419,11 @@ def gen_sorting_sample(seq_len: int, vocab_size: int, num_unique_toks: int) -> D
 #             y.extend(["_", str(token)])
 #     return {"x": x, "y": y}
 
-# this version forces the model to have internal state tracking
+# don't leak the popped token in the input sequence, only in the output sequence
 def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
     # output:
-    # x: i 2 i 1 o o i 4 o
-    # y: _ _ _ _ 1 2 _ _ 4
+    # x: i 2 i 1 o o i 4 o i 2
+    # y: _ _ _ _ _ 1 2 _ _ 4 _
     x = []
     y = []
     stack = []
@@ -622,9 +442,10 @@ def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
             token = stack.pop()
             x.extend(["o"])
             y.extend([str(token)])
+    # because the training code shifts y to the left by one, we need to add a _ at the start of y and remove the last element of y to keep the lengths consistent
+    y = ["_"] + y[:-1]
     return {"x": x, "y": y}
 
-# visible outputs version
 # def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
 #     # output:
 #     # x: i 0 2 i 1 1 o 0 2 o 1 1 i 0 4 o 0 4
@@ -650,11 +471,11 @@ def gen_single_stack_ops_sample(seq_len: int, vocab_size: int) -> Dict:
 #             y.extend(["_", "_", str(token)])
 #     return {"x": x, "y": y}
 
-# hidden outputs version
+# also don't leak the popped token in the input sequence for multi-stack ops
 def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -> Dict:
     # output:
-    # x: i 0 2 i 1 1 o 0 o 1 _ i 0 4 o 0
-    # y: _ _ _ _ _ _ _ 2 _ 1 _ _ _ _ _ 4
+    # x: i 0 2 i 1 1 o 0 o 1 i 0 4 o 0 i 0 1
+    # y: _ _ _ _ _ _ _ _ 2 _ 1 _ _ _ _ 4 _ _
     x = []
     y = []
     stacks = [[] for _ in range(num_stacks)]
@@ -674,6 +495,8 @@ def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -
             token = stacks[stack_idx].pop()
             x.extend(["o", str(stack_idx)])
             y.extend(["_", str(token)])
+    # because the training code shifts y to the left by one, we need to add a _ at the start of y and remove the last element of y to keep the lengths consistent
+    y = ["_"] + y[:-1]
     return {"x": x, "y": y}
 
 # def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
@@ -708,10 +531,11 @@ def gen_multi_stack_ops_sample(seq_len: int, vocab_size: int, num_stacks: int) -
 #             y.extend(["_", "_"])
 #     return {"x": x, "y": y}
 
+# also don't leak the read token in the input sequence for flip flop
 def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
     # output:
-    # x: w 0 i 1 r 0 i 0 w 1 r 1
-    # y: _ _ _ _ _ 0 _ _ _ _ _ 1
+    # x: w 0 i 1 r i 0 w 1 r w 1
+    # y: _ _ _ _ _ 0 _ _ _ _ 1 _
     x = []
     y = []
     state = None
@@ -738,6 +562,8 @@ def gen_flip_flop_language_sample(seq_len: int, vocab_size: int) -> Dict:
         else:
             x.extend([op, str(token)])
             y.extend(["_", "_"])
+    # because the training code shifts y to the left by one, we need to add a _ at the start of y and remove the last element of y to keep the lengths consistent
+    y = ["_"] + y[:-1]
     return {"x": x, "y": y}
 
 # === Arithmetic state tracking tasks ===
