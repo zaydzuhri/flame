@@ -6,7 +6,7 @@
     "attn_mode": "chunk",
     "residual_in_fp32": false,
     "block_residual_in_fp32": false,
-    "expand_ratio": 2,
+    "expand_ratio": 8,
     "input_gate_low_rank": "auto",
     "use_short_conv": true,
     "conv_size": 4,
