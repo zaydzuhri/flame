@@ -13,7 +13,7 @@
   "norm_eps": 1e-05,
   "model_type": "mamba2",
   "n_groups": 1,
-  "num_hidden_layers": 2,
+  "num_hidden_layers": 4,
   "pad_token_id": 0,
   "rescale_prenorm_residual": true,
   "residual_in_fp32": false,

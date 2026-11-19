@@ -6,7 +6,7 @@
     "attn_mode": "chunk",
     "residual_in_fp32": false,
     "block_residual_in_fp32": false,
-    "expand_ratio": 16,
+    "expand_ratio": 2,
     "input_gate_low_rank": "auto",
     "use_short_conv": true,
     "conv_size": 4,
@@ -19,7 +19,8 @@
     "attn": null,
     "ska_attn": {
         "num_heads": 2,
-        "head_dim": 32
+        "head_dim": 32,
+        "window_size": 32
     },
     "use_cache": true,
     "tie_word_embeddings": true,
